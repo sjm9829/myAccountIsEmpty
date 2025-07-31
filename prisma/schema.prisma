@@ -1,0 +1,119 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  email     String   @unique
+  password  String
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  accounts Account[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model Institution {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  type        InstitutionType
+  contactNumber String?
+  websiteUrl  String?
+  createdAt   DateTime       @default(now())
+  
+  accounts Account[]
+
+  @@map("institutions")
+}
+
+enum InstitutionType {
+  SECURITIES    // 증권사
+  BANK         // 은행
+  INSURANCE    // 보험사
+  CRYPTO       // 가상화폐 거래소
+  INVESTMENT   // 투자회사/자산운용사
+  OTHER        // 기타
+}
+
+model Account {
+  id            String   @id @default(cuid())
+  userId        String
+  institutionId String
+  accountNumber String
+  accountType   String
+  nickname      String?  // 계좌 별명
+  createdAt     DateTime @default(now())
+  
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institution Institution @relation(fields: [institutionId], references: [id])
+  
+  holdings     Holding[]
+  transactions Transaction[]
+
+  @@unique([userId, accountNumber])
+  @@map("accounts")
+}
+
+model Holding {
+  id           String   @id @default(cuid())
+  accountId    String
+  stockCode    String
+  stockName    String
+  quantity     Int
+  averagePrice Float
+  currentPrice Float?
+  currency     String   @default("KRW") // 통화 (KRW, USD 등)
+  updatedAt    DateTime @updatedAt
+  
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, stockCode])
+  @@map("holdings")
+}
+
+model Transaction {
+  id              String      @id @default(cuid())
+  accountId       String
+  stockCode       String
+  stockName       String
+  transactionType TransactionType
+  quantity        Int
+  price           Float
+  totalAmount     Float
+  fees            Float?
+  currency        String      @default("KRW") // 통화 (KRW, USD 등)
+  transactionDate DateTime
+  createdAt       DateTime    @default(now())
+  
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  DIVIDEND
+  DEPOSIT
+  WITHDRAWAL
+}

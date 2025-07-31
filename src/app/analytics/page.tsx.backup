@@ -1,0 +1,481 @@
+'use client';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { usePortfolio } from '@/contexts/PortfolioContext';
+import { useRealTimeStockData } from '@/hooks/useRealTimeStockData';
+import { PortfolioData } from '@/lib/localStorage';
+import Navigation from '@/components/Navigation';
+
+interface PortfolioAnalytics {
+  totalValue: number;
+  totalInvestment: number;
+  totalReturn: number;
+  returnPercent: number;
+  sectorAllocation: { [key: string]: number };
+  topPerformers: Array<{
+    stockCode: string;
+    name: string;
+    returnPercent: number;
+    value: number;
+  }>;
+  riskMetrics: {
+    volatility: number;
+    sharpeRatio: number;
+    diversificationScore: number;
+  };
+}
+
+interface StockData {
+  currentPrice: number;
+  change: number;
+  changePercent: number;
+  volume: number;
+  name: string;
+}
+
+interface StockPrice {
+  code: string;
+  name: string;
+  currentPrice: number;
+  change: number;
+  changePercent: number;
+  volume: number;
+  marketCap?: number;
+  high52w?: number;
+  low52w?: number;
+}
+
+export default function AnalyticsPage() {
+  const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null);
+  const [stockPrices, setStockPrices] = useState<{ [key: string]: StockPrice }>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const router = useRouter();
+  const { data: portfolioData } = usePortfolio();
+
+  // 보유 종목들의 심볼 추출
+  const holdingSymbols = useMemo(() => {
+    if (!portfolioData || portfolioData.holdings.length === 0) return [];
+    return Array.from(new Set(portfolioData.holdings.map(holding => holding.stockCode)));
+  }, [portfolioData]);
+
+  // 실시간 주가 데이터 Hook 사용
+  const { 
+    stockData: realTimeData, 
+    isLoading: stockDataLoading, 
+    error: stockDataError,
+    lastUpdate: stockLastUpdate,
+    refreshData: refreshStockData
+  } = useRealTimeStockData({
+    symbols: holdingSymbols,
+    intervalMs: 30000, // 30초마다 업데이트
+    enabled: holdingSymbols.length > 0
+  });
+
+  // 섹터 매핑 함수
+  const getSectorFromStockCode = (stockCode: string): string => {
+    const sectorMapping: { [key: string]: string } = {
+      '005930': '반도체',
+      '000660': '음료',
+      '035420': 'IT',
+      '051910': '화학',
+      '006400': '통신',
+      'AAPL': 'IT',
+      'GOOGL': 'IT',
+      'MSFT': 'IT',
+      'TSLA': '자동차',
+      'NVDA': '반도체',
+      'GOLD001': '금',
+      'SILVER001': '은',
+      'PLATINUM001': '백금'
+    };
+    return sectorMapping[stockCode] || '기타';
+  };
+
+  // 변동성 계산
+  const calculateVolatility = (holdings: PortfolioData['holdings'], currentPrices: { [key: string]: StockData }): number => {
+    let totalVolatility = 0;
+    let totalWeight = 0;
+
+    for (const holding of holdings) {
+      const currentPrice = currentPrices[holding.stockCode]?.currentPrice || holding.averagePrice;
+      const weight = (holding.quantity * currentPrice);
+      const changePercent = currentPrices[holding.stockCode]?.changePercent || 0;
+      
+      totalVolatility += Math.abs(changePercent) * weight;
+      totalWeight += weight;
+    }
+
+    return totalWeight > 0 ? (totalVolatility / totalWeight) * Math.sqrt(252) : 0;
+  };
+
+  // 샤프 비율 계산
+  const calculateSharpeRatio = (returnPercent: number, volatility: number): number => {
+    const riskFreeRate = 3.0;
+    return volatility > 0 ? (returnPercent - riskFreeRate) / volatility : 0;
+  };
+
+  // 다양화 점수 계산
+  const calculateDiversificationScore = (sectorAllocation: { [key: string]: number }): number => {
+    const sectors = Object.values(sectorAllocation);
+    if (sectors.length <= 1) return 0;
+
+    const mean = sectors.reduce((sum, value) => sum + value, 0) / sectors.length;
+    const variance = sectors.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / sectors.length;
+    const standardDeviation = Math.sqrt(variance);
+    
+    return Math.max(0, 100 - (standardDeviation * 2));
+  };
+
+  // 실시간 데이터를 기반으로 분석 데이터 계산
+  const calculateAnalytics = useCallback((): PortfolioAnalytics | null => {
+    if (!portfolioData || portfolioData.holdings.length === 0) {
+      return {
+        totalValue: 0,
+        totalInvestment: 0,
+        totalReturn: 0,
+        returnPercent: 0,
+        sectorAllocation: {},
+        topPerformers: [],
+        riskMetrics: {
+          volatility: 0,
+          sharpeRatio: 0,
+          diversificationScore: 0
+        }
+      };
+    }
+
+    let totalValue = 0;
+    let totalInvestment = 0;
+    const sectorAllocation: { [key: string]: number } = {};
+    const performers: Array<{
+      stockCode: string;
+      name: string;
+      returnPercent: number;
+      value: number;
+    }> = [];
+
+    // 각 보유 종목 분석
+    for (const holding of portfolioData.holdings) {
+      // 실시간 데이터가 있으면 사용, 없으면 평균단가 사용
+      const realTimePrice = realTimeData[holding.stockCode];
+      const currentPrice = realTimePrice?.regularMarketPrice || holding.averagePrice;
+      
+      const currentValue = holding.quantity * currentPrice;
+      const investment = holding.quantity * holding.averagePrice;
+      const returnValue = currentValue - investment;
+      const returnPercent = investment > 0 ? (returnValue / investment) * 100 : 0;
+
+      totalValue += currentValue;
+      totalInvestment += investment;
+
+      // 섹터별 할당
+      const sector = getSectorFromStockCode(holding.stockCode);
+      sectorAllocation[sector] = (sectorAllocation[sector] || 0) + currentValue;
+
+      // 성과자 데이터
+      performers.push({
+        stockCode: holding.stockCode,
+        name: holding.stockName,
+        returnPercent,
+        value: currentValue
+      });
+    }
+
+    // 섹터 분배를 퍼센트로 변환
+    const totalPortfolioValue = totalValue || 1;
+    Object.keys(sectorAllocation).forEach(sector => {
+      sectorAllocation[sector] = (sectorAllocation[sector] / totalPortfolioValue) * 100;
+    });
+
+    // 상위 성과자 정렬 (수익률 기준)
+    const topPerformers = performers
+      .sort((a, b) => b.returnPercent - a.returnPercent)
+      .slice(0, 5);
+
+    const totalReturn = totalValue - totalInvestment;
+    const returnPercent = totalInvestment > 0 ? (totalReturn / totalInvestment) * 100 : 0;
+
+    // 위험 지표 계산 (간단한 버전)
+    const volatility = Math.abs(returnPercent) / 10; // 간단한 변동성 계산
+    const sharpeRatio = returnPercent > 0 ? returnPercent / volatility : 0;
+    const diversificationScore = calculateDiversificationScore(sectorAllocation);
+
+    return {
+      totalValue,
+      totalInvestment,
+      totalReturn,
+      returnPercent,
+      sectorAllocation,
+      topPerformers,
+      riskMetrics: {
+        volatility,
+        sharpeRatio,
+        diversificationScore
+      }
+    };
+  }, [portfolioData, realTimeData]);
+    const topPerformers = performers
+      .sort((a, b) => b.returnPercent - a.returnPercent)
+      .slice(0, 5);
+
+    // 리스크 메트릭 계산
+    const totalReturn = totalValue - totalInvestment;
+    const returnPercent = totalInvestment > 0 ? (totalReturn / totalInvestment) * 100 : 0;
+    const volatility = calculateVolatility(portfolioData.holdings, currentPrices);
+    const sharpeRatio = calculateSharpeRatio(returnPercent, volatility);
+    const diversificationScore = calculateDiversificationScore(sectorAllocation);
+
+    return {
+      totalValue,
+      totalInvestment,
+      totalReturn,
+      returnPercent,
+      sectorAllocation,
+      topPerformers,
+      riskMetrics: {
+        volatility,
+        sharpeRatio,
+        diversificationScore
+      }
+    };
+  }, [portfolioData, realTimeData]);
+
+  // 실시간 데이터가 업데이트될 때마다 분석 재계산
+  useEffect(() => {
+    const newAnalytics = calculateAnalytics();
+    if (newAnalytics) {
+      setAnalytics(newAnalytics);
+      setLastUpdate(new Date());
+    }
+    setIsLoading(false);
+  }, [calculateAnalytics]);
+
+  // 에러 처리 업데이트
+  useEffect(() => {
+    if (stockDataError) {
+      setError(stockDataError);
+    } else {
+      setError('');
+    }
+  }, [stockDataError]);
+        setLastUpdate(new Date());
+      }
+    } catch (error) {
+      console.error('주가 정보 가져오기 실패:', error);
+    }
+  }, [portfolioData]);
+
+  // 분석 데이터 가져오기
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const analyticsData = await calculateAnalytics();
+      if (analyticsData) {
+        setAnalytics(analyticsData);
+        setError('');
+      }
+    } catch (error) {
+      console.error('분석 데이터 계산 실패:', error);
+      setError('분석 데이터를 계산하는 중 오류가 발생했습니다.');
+    }
+  }, [calculateAnalytics]);
+
+  // 초기 데이터 로드
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadData = async () => {
+      setIsLoading(true);
+      await Promise.all([fetchAnalytics(), fetchStockPrices()]);
+      
+      if (isMounted) {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+
+    // 30초마다 주가 업데이트
+    const interval = setInterval(() => {
+      if (isMounted) {
+        fetchStockPrices();
+      }
+    }, 30000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [fetchAnalytics, fetchStockPrices]);
+
+  // 숫자 포맷팅
+  const formatNumber = (num: number): string => {
+    return new Intl.NumberFormat('ko-KR').format(Math.round(num));
+  };
+
+  // 새로고침 핸들러
+  const handleRefresh = () => {
+    setIsLoading(true);
+    Promise.all([fetchAnalytics(), fetchStockPrices()]).finally(() => setIsLoading(false));
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">포트폴리오 분석 중...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
+          <button
+            onClick={handleRefresh}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+          >
+            다시 시도
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!analytics) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600 dark:text-gray-400 mb-4">포트폴리오 데이터가 없습니다.</p>
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+          >
+            대시보드로 이동
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <Navigation />
+
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {/* 페이지 헤더 */}
+        <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">포트폴리오 분석</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                마지막 업데이트: {lastUpdate.toLocaleTimeString('ko-KR')}
+              </p>
+            </div>
+            <button
+              onClick={handleRefresh}
+              disabled={isLoading}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center"
+            >
+              <svg className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {isLoading ? '업데이트 중...' : '새로고침'}
+            </button>
+          </div>
+        </div>
+
+        <div className="px-4 py-6 sm:px-0">
+          {/* 포트폴리오 요약 */}
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">총 자산가치</h3>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                {formatNumber(analytics.totalValue)}원
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">현재 평가액</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">총 수익률</h3>
+              <p className={`text-2xl font-bold ${
+                analytics.returnPercent >= 0 
+                  ? 'text-red-600 dark:text-red-400' 
+                  : 'text-blue-600 dark:text-blue-400'
+              }`}>
+                {analytics.returnPercent >= 0 ? '+' : ''}{analytics.returnPercent.toFixed(2)}%
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {analytics.totalReturn >= 0 ? '+' : ''}{formatNumber(analytics.totalReturn)}원
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">변동성</h3>
+              <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                {analytics.riskMetrics.volatility.toFixed(2)}%
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">연간 변동성</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">다양화 점수</h3>
+              <p className={`text-2xl font-bold ${
+                analytics.riskMetrics.diversificationScore >= 70 
+                  ? 'text-green-600 dark:text-green-400' 
+                  : analytics.riskMetrics.diversificationScore >= 50
+                  ? 'text-yellow-600 dark:text-yellow-400'
+                  : 'text-red-600 dark:text-red-400'
+              }`}>
+                {analytics.riskMetrics.diversificationScore.toFixed(0)}
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">분산투자 정도</p>
+            </div>
+          </div>
+
+          {/* 실시간 주가 정보 */}
+          <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">실시간 주가 정보</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              {Object.values(stockPrices).map((stock) => (
+                <div key={stock.code} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h4 className="font-medium text-gray-900 dark:text-white">{stock.name}</h4>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{stock.code}</p>
+                    </div>
+                    <span className={`text-sm px-2 py-1 rounded ${
+                      stock.changePercent >= 0 
+                        ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
+                        : 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
+                    }`}>
+                      {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-lg font-bold text-gray-900 dark:text-white">
+                      {formatNumber(stock.currentPrice)}원
+                    </p>
+                    <p className={`text-sm ${
+                      stock.change >= 0 
+                        ? 'text-red-600 dark:text-red-400' 
+                        : 'text-blue-600 dark:text-blue-400'
+                    }`}>
+                      {stock.change >= 0 ? '+' : ''}{formatNumber(stock.change)}원
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      거래량: {formatNumber(stock.volume)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
