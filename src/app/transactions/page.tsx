@@ -27,14 +27,16 @@ interface Account {
 interface Transaction {
   id: string;
   type: 'DEPOSIT' | 'WITHDRAWAL' | 'DIVIDEND' | 'BUY' | 'SELL';
-  date: string;
+  transactionDate: string; // DB에서 오는 필드명과 일치
   stockCode?: string;
   stockName?: string;
-  quantity?: number;
-  price?: number;
-  amount: number;
+  quantity?: number | null;
+  price?: number | null;
+  totalAmount?: number | null; // DB 필드명과 일치
+  amount?: number | null; // 호환성을 위해 유지
   currency: string;
-  fee?: number;
+  fees?: number | null; // DB 필드명과 일치
+  fee?: number | null; // 호환성을 위해 유지
   description?: string;
   account: Account;
   createdAt: string;
@@ -128,7 +130,15 @@ export default function TransactionsPage() {
 
       if (transactionsResponse.ok) {
         const data = await transactionsResponse.json();
-        setTransactions(data.transactions || []);
+        // API 응답 데이터를 프론트엔드 형식으로 변환
+        const transformedTransactions = (data.transactions || []).map((transaction: Record<string, unknown>) => ({
+          ...transaction,
+          type: transaction.transactionType || transaction.type,
+          amount: transaction.totalAmount || transaction.amount,
+          fee: transaction.fees || transaction.fee,
+          transactionDate: transaction.transactionDate || transaction.date
+        }));
+        setTransactions(transformedTransactions as Transaction[]);
       }
 
       if (accountsResponse.ok) {
@@ -171,8 +181,8 @@ export default function TransactionsPage() {
     return transactions.filter(transaction => {
       const matchesAccount = !selectedAccount || transaction.account.id === selectedAccount;
       const matchesType = !selectedType || transaction.type === selectedType;
-      const matchesDateFrom = !dateFrom || transaction.date >= dateFrom;
-      const matchesDateTo = !dateTo || transaction.date <= dateTo;
+      const matchesDateFrom = !dateFrom || transaction.transactionDate >= dateFrom;
+      const matchesDateTo = !dateTo || transaction.transactionDate <= dateTo;
       const matchesSearch = !searchTerm || 
         (transaction.stockName && transaction.stockName.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (transaction.stockCode && transaction.stockCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -194,7 +204,10 @@ export default function TransactionsPage() {
     };
 
     filteredTransactions.forEach(transaction => {
-      const amountKRW = transaction.currency === 'USD' ? transaction.amount * 1300 : transaction.amount;
+      const amount = transaction.totalAmount || transaction.amount; // DB와 호환성
+      if (!amount) return; // amount가 null이면 건너뛰기
+      
+      const amountKRW = transaction.currency === 'USD' ? amount * 1300 : amount;
       
       switch (transaction.type) {
         case 'DEPOSIT':
@@ -291,17 +304,33 @@ export default function TransactionsPage() {
 
   const handleEdit = (transaction: Transaction) => {
     setEditingTransaction(transaction);
+    const amount = transaction.totalAmount || transaction.amount; // DB와 호환성
+    const fee = transaction.fees || transaction.fee; // DB와 호환성
+    
+    // 날짜 안전하게 처리
+    let dateString = '';
+    try {
+      const date = new Date(transaction.transactionDate);
+      if (!isNaN(date.getTime())) {
+        dateString = date.toISOString().split('T')[0];
+      } else {
+        dateString = new Date().toISOString().split('T')[0]; // 기본값
+      }
+    } catch {
+      dateString = new Date().toISOString().split('T')[0]; // 기본값
+    }
+    
     setFormData({
       type: transaction.type,
-      date: transaction.date,
+      date: dateString,
       accountId: transaction.account.id,
       stockCode: transaction.stockCode || '',
       stockName: transaction.stockName || '',
       quantity: transaction.quantity?.toString() || '',
       price: transaction.price?.toString() || '',
-      amount: transaction.amount.toString(),
+      amount: amount?.toString() || '',
       currency: transaction.currency,
-      fee: transaction.fee?.toString() || '',
+      fee: fee?.toString() || '',
       description: transaction.description || ''
     });
     setShowStockDropdown(false);
@@ -360,7 +389,10 @@ export default function TransactionsPage() {
     return `${account.institution.name} - ${maskedAccountNumber}`;
   };
 
-  const formatAmount = (amount: number, currency: string) => {
+  const formatAmount = (amount: number | null | undefined, currency: string) => {
+    if (amount == null || amount === undefined) {
+      return '-';
+    }
     const symbol = currency === 'USD' ? '$' : '₩';
     return `${symbol}${amount.toLocaleString()}`;
   };
@@ -978,7 +1010,14 @@ export default function TransactionsPage() {
                     return (
                       <tr key={transaction.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                          {new Date(transaction.date).toLocaleDateString('ko-KR')}
+                          {(() => {
+                            try {
+                              const date = new Date(transaction.transactionDate);
+                              return isNaN(date.getTime()) ? '날짜 오류' : date.toLocaleDateString('ko-KR');
+                            } catch {
+                              return '날짜 오류';
+                            }
+                          })()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${typeInfo.color}-100 dark:bg-${typeInfo.color}-900/30 text-${typeInfo.color}-800 dark:text-${typeInfo.color}-200`}>
@@ -998,7 +1037,7 @@ export default function TransactionsPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                           {transaction.quantity && transaction.price ? (
                             <div>
-                              <div>{transaction.quantity.toLocaleString()}주</div>
+                              <div>{transaction.quantity?.toLocaleString() || 0}주</div>
                               <div className="text-gray-500 dark:text-gray-400">{formatAmount(transaction.price, transaction.currency)}</div>
                             </div>
                           ) : (
@@ -1007,11 +1046,11 @@ export default function TransactionsPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {formatAmount(transaction.amount, transaction.currency)}
+                            {formatAmount(transaction.totalAmount || transaction.amount, transaction.currency)}
                           </div>
-                          {transaction.fee && (
+                          {(transaction.fees || transaction.fee) && (
                             <div className="text-xs text-gray-500 dark:text-gray-400">
-                              수수료: {formatAmount(transaction.fee, transaction.currency)}
+                              수수료: {formatAmount(transaction.fees || transaction.fee, transaction.currency)}
                             </div>
                           )}
                         </td>

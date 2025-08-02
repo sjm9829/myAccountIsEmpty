@@ -46,12 +46,12 @@ export interface Holding {
 export interface Transaction {
   id: string;
   accountId: string;
-  stockCode: string;
-  stockName: string;
+  stockCode?: string | null;
+  stockName?: string | null;
   transactionType: 'BUY' | 'SELL';
-  quantity: number;
-  price: number;
-  fees?: number;
+  quantity?: number | null;
+  price?: number | null;
+  fees?: number | null;
   transactionDate: Date;
   createdAt: Date;
   account?: Account;

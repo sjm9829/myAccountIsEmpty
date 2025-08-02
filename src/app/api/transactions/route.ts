@@ -261,72 +261,9 @@ export async function POST(request: NextRequest) {
 
     console.log('거래 생성 완료:', transaction.id);
 
-    // 거래 유형에 따라 보유종목 업데이트
-    if (type === 'BUY') {
-      // 매수: 보유종목 추가 또는 업데이트
-      const existingHolding = await prisma.holding.findFirst({
-        where: {
-          accountId: accountId,
-          stockCode: stockCode,
-        },
-      });
-
-      if (existingHolding) {
-        // 기존 보유종목이 있으면 수량과 평균단가 업데이트
-        const totalQuantity = existingHolding.quantity + quantity;
-        const totalValue = (existingHolding.quantity * existingHolding.averagePrice) + (quantity * price);
-        const newAveragePrice = totalValue / totalQuantity;
-
-        await prisma.holding.update({
-          where: { id: existingHolding.id },
-          data: {
-            quantity: totalQuantity,
-            averagePrice: newAveragePrice,
-          },
-        });
-        console.log('기존 보유종목 업데이트 완료');
-      } else {
-        // 새 보유종목 생성
-        await prisma.holding.create({
-          data: {
-            accountId: accountId,
-            stockCode: stockCode,
-            stockName: stockName,
-            quantity: quantity,
-            averagePrice: price,
-          },
-        });
-        console.log('새 보유종목 생성 완료');
-      }
-    } else if (type === 'SELL') {
-      // 매도: 보유종목 수량 감소
-      const existingHolding = await prisma.holding.findFirst({
-        where: {
-          accountId: accountId,
-          stockCode: stockCode,
-        },
-      });
-
-      if (existingHolding) {
-        const newQuantity = existingHolding.quantity - quantity;
-        
-        if (newQuantity <= 0) {
-          // 보유수량이 0이 되면 삭제
-          await prisma.holding.delete({
-            where: { id: existingHolding.id },
-          });
-          console.log('보유종목 삭제 완료');
-        } else {
-          // 수량만 업데이트 (평균단가는 유지)
-          await prisma.holding.update({
-            where: { id: existingHolding.id },
-            data: {
-              quantity: newQuantity,
-            },
-          });
-          console.log('보유종목 수량 업데이트 완료');
-        }
-      }
+    // 매수/매도 거래인 경우 해당 종목의 보유종목 재계산
+    if ((type === 'BUY' || type === 'SELL') && stockCode) {
+      await recalculateHoldingsForStock(accountId, stockCode);
     }
 
     return NextResponse.json({ transaction }, { status: 201 });
@@ -336,5 +273,92 @@ export async function POST(request: NextRequest) {
       { error: '거래 내역 추가 중 오류가 발생했습니다.' },
       { status: 500 }
     );
+  }
+}
+
+// 특정 종목의 보유종목을 거래내역 기반으로 재계산하는 함수
+async function recalculateHoldingsForStock(accountId: string, stockCode: string) {
+  try {
+    // 해당 계좌의 해당 종목 거래내역을 모두 조회
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        accountId: accountId,
+        stockCode: stockCode,
+        OR: [
+          { transactionType: 'BUY' },
+          { transactionType: 'SELL' }
+        ]
+      },
+      orderBy: {
+        transactionDate: 'asc',
+      },
+    });
+
+    let totalQuantity = 0;
+    let totalInvestment = 0;
+
+    // 거래내역을 순차적으로 처리하여 보유수량과 평단가 계산
+    transactions.forEach(transaction => {
+      if (transaction.transactionType === 'BUY') {
+        totalQuantity += transaction.quantity;
+        totalInvestment += transaction.totalAmount;
+      } else if (transaction.transactionType === 'SELL') {
+        const sellQuantity = transaction.quantity;
+        const sellRatio = sellQuantity / totalQuantity;
+        
+        totalQuantity -= sellQuantity;
+        totalInvestment *= (1 - sellRatio); // 매도 비율만큼 투자금액 감소
+      }
+    });
+
+    const averagePrice = totalQuantity > 0 ? totalInvestment / totalQuantity : 0;
+
+    // 기존 보유종목 조회
+    const existingHolding = await prisma.holding.findFirst({
+      where: {
+        accountId: accountId,
+        stockCode: stockCode,
+      },
+    });
+
+    if (totalQuantity > 0) {
+      if (existingHolding) {
+        // 기존 보유종목 업데이트
+        await prisma.holding.update({
+          where: { id: existingHolding.id },
+          data: {
+            quantity: totalQuantity,
+            averagePrice: averagePrice,
+            stockName: transactions[transactions.length - 1]?.stockName || existingHolding.stockName,
+            currency: transactions[transactions.length - 1]?.currency || existingHolding.currency,
+          },
+        });
+        console.log('기존 보유종목 업데이트 완료');
+      } else {
+        // 새 보유종목 생성
+        const latestTransaction = transactions[transactions.length - 1];
+        await prisma.holding.create({
+          data: {
+            accountId: accountId,
+            stockCode: stockCode,
+            stockName: latestTransaction?.stockName || '',
+            quantity: totalQuantity,
+            averagePrice: averagePrice,
+            currency: latestTransaction?.currency || 'KRW',
+          },
+        });
+        console.log('새 보유종목 생성 완료');
+      }
+    } else if (existingHolding) {
+      // 보유수량이 0이면 기존 보유종목 삭제
+      await prisma.holding.delete({
+        where: { id: existingHolding.id },
+      });
+      console.log('보유종목 삭제 완료');
+    }
+
+    console.log(`보유종목 재계산 완료 - ${stockCode}: 수량 ${totalQuantity}, 평단가 ${averagePrice}`);
+  } catch (error) {
+    console.error('Failed to recalculate holdings:', error);
   }
 }

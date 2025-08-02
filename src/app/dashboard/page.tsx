@@ -43,6 +43,12 @@ interface Holding {
   account: Account;
 }
 
+interface HoldingWithTodayChange extends Holding {
+  todayChangePercent: number;
+  todayChange: number;
+  todayProfitLoss: number;
+}
+
 interface PortfolioSummary {
   totalValue: number;
   totalInvestment: number;
@@ -175,19 +181,36 @@ export default function DashboardPage() {
     };
   }, [summary, updatedHoldings]);
 
-  // 오늘의 상승/하락 종목 (TOP 3)
+  // 오늘의 상승/하락 종목 (TOP 3) - 오늘 하루 변화율 기준
   const todayMovers = useMemo(() => {
     if (!updatedHoldings.length) return { gainers: [], losers: [] };
 
-    const sortedByChange = [...updatedHoldings]
-      .filter(holding => holding.profitLossPercentage !== 0)
-      .sort((a, b) => b.profitLossPercentage - a.profitLossPercentage);
+    // 실시간 데이터에서 오늘의 변화율을 가져와서 계산
+    const holdingsWithTodayChange = updatedHoldings.map(holding => {
+      const stockRealTimeData = realTimeData[holding.stockCode];
+      const todayChangePercent = stockRealTimeData?.regularMarketChangePercent || 0;
+      const todayChange = stockRealTimeData?.regularMarketChange || 0;
+      
+      // 보유 수량을 고려한 오늘의 손익 (원화 기준)
+      const todayProfitLoss = todayChange * holding.quantity * (summary?.exchangeRate || 1380);
+      
+      return {
+        ...holding,
+        todayChangePercent,
+        todayChange,
+        todayProfitLoss
+      } as HoldingWithTodayChange;
+    });
+
+    const sortedByTodayChange = holdingsWithTodayChange
+      .filter(holding => holding.todayChangePercent !== 0)
+      .sort((a, b) => b.todayChangePercent - a.todayChangePercent);
 
     return {
-      gainers: sortedByChange.slice(0, 3),
-      losers: sortedByChange.slice(-3).reverse()
+      gainers: sortedByTodayChange.filter(h => h.todayChangePercent > 0).slice(0, 3),
+      losers: sortedByTodayChange.filter(h => h.todayChangePercent < 0).slice(-3).reverse()
     };
-  }, [updatedHoldings]);
+  }, [updatedHoldings, realTimeData, summary]);
 
   // 계좌 표시명 생성 함수
   const getAccountDisplayName = (account: Account) => {
@@ -341,14 +364,14 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600 dark:text-gray-400">{holding.stockCode}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold text-red-600 dark:text-red-400">+{holding.profitLossPercentage.toFixed(2)}%</p>
-                      <p className="text-sm text-red-600 dark:text-red-400">+₩{holding.profitLossKRW.toLocaleString()}</p>
+                      <p className="font-semibold text-red-600 dark:text-red-400">+{holding.todayChangePercent.toFixed(2)}%</p>
+                      <p className="text-sm text-red-600 dark:text-red-400">+₩{holding.todayProfitLoss.toLocaleString()}</p>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 dark:text-gray-400 text-center py-4">상승 종목이 없습니다</p>
+              <p className="text-gray-500 dark:text-gray-400 text-center py-4">오늘 상승한 종목이 없습니다</p>
             )}
           </div>
 
@@ -366,14 +389,14 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600 dark:text-gray-400">{holding.stockCode}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold text-blue-600 dark:text-blue-400">{holding.profitLossPercentage.toFixed(2)}%</p>
-                      <p className="text-sm text-blue-600 dark:text-blue-400">₩{holding.profitLossKRW.toLocaleString()}</p>
+                      <p className="font-semibold text-blue-600 dark:text-blue-400">{holding.todayChangePercent.toFixed(2)}%</p>
+                      <p className="text-sm text-blue-600 dark:text-blue-400">₩{holding.todayProfitLoss.toLocaleString()}</p>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 dark:text-gray-400 text-center py-4">하락 종목이 없습니다</p>
+              <p className="text-gray-500 dark:text-gray-400 text-center py-4">오늘 하락한 종목이 없습니다</p>
             )}
           </div>
 

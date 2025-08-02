@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="2b5f86d7-8ff5-4ca0-87d3-d52efcab06ba" name="변경" comment="">
+      <change beforePath="$PROJECT_DIR$/.github/copilot-instructions.md" beforeDir="false" afterPath="$PROJECT_DIR$/.github/copilot-instructions.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cookies.txt" beforeDir="false" afterPath="$PROJECT_DIR$/cookies.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/middleware.ts" beforeDir="false" afterPath="$PROJECT_DIR$/middleware.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/prisma/dev.db" beforeDir="false" afterPath="$PROJECT_DIR$/prisma/dev.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/prisma/seed.ts" beforeDir="false" afterPath="$PROJECT_DIR$/prisma/seed.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/check-database.js" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/check-database.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/update-user-role.js" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/update-user-role.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/accounts/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/accounts/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/admin/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/admin/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/analytics/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/analytics/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/analytics/page.tsx.backup" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/analytics/page.tsx.backup" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/analytics/page_enhanced.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/analytics/page_enhanced.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/analytics/page_new.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/analytics/page_new.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/accounts/[id]/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/accounts/[id]/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/accounts/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/accounts/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/admin/institutions/[id]/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/admin/institutions/[id]/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/admin/institutions/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/admin/institutions/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/auth/login/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/auth/login/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/auth/logout/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/auth/logout/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/auth/register/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/auth/register/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/brokers/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/brokers/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/exchange-rate/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/exchange-rate/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/institutions/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/institutions/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/portfolio/analytics/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/portfolio/analytics/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/portfolio/holdings/[holdingId]/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/portfolio/holdings/[holdingId]/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/portfolio/holdings/recalculate/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/portfolio/holdings/recalculate/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/portfolio/holdings/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/portfolio/holdings/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/stock-data/korean/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/stock-data/korean/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/stock-data/krx-gold/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/stock-data/krx-gold/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/stock-data/naver/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/stock-data/naver/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/stock-data/search/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/stock-data/search/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/stock-data/yahoo/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/stock-data/yahoo/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/stock-prices/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/stock-prices/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/transactions/[transactionId]/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/transactions/[transactionId]/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/transactions/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/transactions/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/transactions/route_backup.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/transactions/route_backup.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/user/me/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/user/me/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/user/profile/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/user/profile/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/dashboard/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/dashboard/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/holdings/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/holdings/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/login/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/login/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/register/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/register/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/transactions/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/transactions/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/Navigation.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/Navigation.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/StockTicker.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/StockTicker.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/charts/AnalyticsCharts.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/charts/AnalyticsCharts.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/charts/DashboardCharts.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/charts/DashboardCharts.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/charts/PortfolioCharts.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/charts/PortfolioCharts.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/contexts/PortfolioContext.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/contexts/PortfolioContext.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/hooks/useRealTimeStockData.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/hooks/useRealTimeStockData.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/auth.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/auth.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/localStorage.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/localStorage.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/prisma.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/prisma.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/stockAPI.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/stockAPI.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/utils.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/utils.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/types/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/types/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/dateUtils.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/dateUtils.ts" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 2
+}]]></component>
+  <component name="ProjectId" id="30gaasRNMZsF7t4C9TfpXLo4d9R" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "js.debugger.nextJs.config.created.client": "true",
+    "js.debugger.nextJs.config.created.server": "true",
+    "last_opened_file_path": "/Volumes/home/Development/myAccountIsEmpty",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "preferences.pluginManager",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="RunManager" selected="npm.Next.js: 서버 측">
+    <configuration name="Next.js: 클라이언트 측에서 디버그" type="JavascriptDebugType" uri="http://localhost:3000/">
+      <method v="2" />
+    </configuration>
+    <configuration name="Next.js: 서버 측" type="js.build_tools.npm">
+      <package-json value="$PROJECT_DIR$/package.json" />
+      <command value="run" />
+      <scripts>
+        <script value="dev" />
+      </scripts>
+      <node-interpreter value="project" />
+      <envs />
+      <method v="2" />
+    </configuration>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-jdk-9823dce3aa75-fbdcb00ec9e3-intellij.indexing.shared.core-IU-251.27812.49" />
+        <option value="bundled-js-predefined-d6986cc7102b-09060db00ec0-JavaScript-IU-251.27812.49" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="디폴트 작업">
+      <changelist id="2b5f86d7-8ff5-4ca0-87d3-d52efcab06ba" name="변경" comment="" />
+      <created>1754051736472</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1754051736472</updated>
+      <workItem from="1754051737875" duration="605000" />
+    </task>
+    <servers />
+  </component>
+</project>
