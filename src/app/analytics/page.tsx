@@ -5,6 +5,18 @@ import { useRouter } from 'next/navigation';
 import { useRealTimeStockData } from '@/hooks/useRealTimeStockData';
 import Navigation from '@/components/Navigation';
 
+interface Account {
+  id: string;
+  accountNumber: string;
+  accountType: string;
+  nickname?: string;
+  institution: {
+    id: string;
+    name: string;
+    type: string;
+  };
+}
+
 interface Holding {
   id: string;
   stockCode: string;
@@ -15,10 +27,20 @@ interface Holding {
   totalValue?: number;
   profitLoss?: number;
   profitLossPercentage?: number;
+  currency: string;
+  totalValueKRW: number;
+  totalInvestmentKRW: number;
+  profitLossKRW: number;
   account: {
     id: string;
     accountNumber: string;
-    broker: { name: string };
+    accountType: string;
+    nickname?: string;
+    institution: {
+      id: string;
+      name: string;
+      type: string;
+    };
   };
 }
 
@@ -51,6 +73,7 @@ interface PortfolioAnalytics {
 export default function AnalyticsPage() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [analytics, setAnalytics] = useState<PortfolioAnalytics | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -67,6 +90,19 @@ export default function AnalyticsPage() {
     intervalMs: 180000, // 3분
     enabled: true
   });
+
+  // 계좌 데이터 가져오기
+  const fetchAccounts = useCallback(async () => {
+    try {
+      const response = await fetch('/api/accounts');
+      if (response.ok) {
+        const data = await response.json();
+        setAccounts(data.accounts || []);
+      }
+    } catch (err) {
+      console.error('Error fetching accounts:', err);
+    }
+  }, []);
 
   // 보유종목 데이터 가져오기
   const fetchHoldings = useCallback(async () => {
@@ -224,8 +260,25 @@ export default function AnalyticsPage() {
 
   // 초기 데이터 로딩
   useEffect(() => {
-    fetchHoldings();
-  }, [fetchHoldings]);
+    const fetchAllData = async () => {
+      await Promise.all([
+        fetchHoldings(),
+        fetchAccounts()
+      ]);
+    };
+    fetchAllData();
+  }, [fetchHoldings, fetchAccounts]);
+
+  // 계좌 표시명 생성 함수
+  const getAccountDisplayName = (account: Account) => {
+    if (account.nickname) {
+      return `${account.nickname} (${account.institution.name})`;
+    }
+    const maskedAccountNumber = account.accountNumber.length > 8 
+      ? `${account.accountNumber.slice(0, 4)}****${account.accountNumber.slice(-4)}`
+      : account.accountNumber;
+    return `${account.institution.name} - ${maskedAccountNumber}`;
+  };
 
   // 로딩 스켈레톤 컴포넌트
   const SkeletonCard = () => (
@@ -275,10 +328,10 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                  포트폴리오 분석
+                  📈 포트폴리오 분석
                 </h1>
                 <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">
-                  실시간 데이터 기반의 포트폴리오 성과 분석 및 리스크 평가
+                  투자 성과 분석, 리스크 평가 및 포트폴리오 최적화 인사이트
                 </p>
               </div>
               <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 flex-wrap gap-2">
@@ -287,7 +340,7 @@ export default function AnalyticsPage() {
                     stockDataLoading ? 'bg-yellow-400 animate-pulse' : 
                     stockDataError ? 'bg-red-400' : 'bg-green-400'
                   }`} />
-                  {stockDataLoading ? '업데이트 중...' : 
+                  {stockDataLoading ? '분석 데이터 업데이트 중...' : 
                    stockDataError ? '연결 오류' : '실시간 연결'}
                 </div>
                 <div>보유종목: {Array.isArray(holdings) ? holdings.length : 0}개</div>
@@ -307,6 +360,89 @@ export default function AnalyticsPage() {
             </div>
           ) : analytics ? (
             <>
+              {/* 포트폴리오 요약 카드 (4열) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300">총 평가금액</p>
+                      <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                        ₩{analytics.totalValue.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-blue-100 dark:bg-blue-900/20 rounded-full">
+                      <svg className="h-6 w-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300">총 투자금액</p>
+                      <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                        ₩{analytics.totalInvestment.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded-full">
+                      <svg className="h-6 w-6 text-gray-600 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-4m-5 0H3m2 0h3M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300">총 손익</p>
+                      <p className={`text-2xl font-bold ${
+                        analytics.totalReturn >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                      }`}>
+                        {analytics.totalReturn >= 0 ? '+' : ''}₩{analytics.totalReturn.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className={`p-3 rounded-full ${
+                      analytics.totalReturn >= 0 ? 'bg-red-100 dark:bg-red-900/20' : 'bg-blue-100 dark:bg-blue-900/20'
+                    }`}>
+                      <svg className={`h-6 w-6 ${
+                        analytics.totalReturn >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                      }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        {analytics.totalReturn >= 0 ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+                        )}
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-300">수익률</p>
+                      <p className={`text-2xl font-bold ${
+                        analytics.returnPercent >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                      }`}>
+                        {analytics.returnPercent >= 0 ? '+' : ''}{analytics.returnPercent.toFixed(2)}%
+                      </p>
+                    </div>
+                    <div className={`p-3 rounded-full ${
+                      analytics.returnPercent >= 0 ? 'bg-red-100 dark:bg-red-900/20' : 'bg-blue-100 dark:bg-blue-900/20'
+                    }`}>
+                      <svg className={`h-6 w-6 ${
+                        analytics.returnPercent >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                      }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* 주요 지표 카드 - 더 넓은 레이아웃 (3열) */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -576,6 +712,55 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
               </div>
+
+              {/* 계좌별 현황 */}
+              {accounts.length > 0 && (
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                    💼 계좌별 현황
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {accounts.map((account) => {
+                      const accountHoldings = holdings.filter(h => h.account.id === account.id);
+                      const accountValue = accountHoldings.reduce((sum, h) => sum + (h.totalValueKRW || 0), 0);
+                      const accountInvestment = accountHoldings.reduce((sum, h) => sum + (h.totalInvestmentKRW || 0), 0);
+                      const accountProfitLoss = accountValue - accountInvestment;
+                      const accountProfitLossPercentage = accountInvestment > 0 ? (accountProfitLoss / accountInvestment) * 100 : 0;
+
+                      return (
+                        <div key={account.id} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                          <h4 className="font-medium text-gray-900 dark:text-white mb-2">
+                            {getAccountDisplayName(account)}
+                          </h4>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600 dark:text-gray-400">종목 수:</span>
+                              <span className="font-medium text-gray-900 dark:text-white">
+                                {accountHoldings.length}개
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600 dark:text-gray-400">평가금액:</span>
+                              <span className="font-medium text-gray-900 dark:text-white">
+                                ₩{accountValue.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600 dark:text-gray-400">손익:</span>
+                              <span className={`font-medium ${
+                                accountProfitLoss >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                              }`}>
+                                {accountProfitLoss >= 0 ? '+' : ''}₩{accountProfitLoss.toLocaleString()}
+                                ({accountProfitLossPercentage.toFixed(2)}%)
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="text-center py-12">

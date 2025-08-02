@@ -67,7 +67,6 @@ export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dataError, setDataError] = useState('');
   const router = useRouter();
@@ -94,10 +93,9 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         setDataError('');
-        const [userResponse, holdingsResponse, accountsResponse] = await Promise.all([
+        const [userResponse, holdingsResponse] = await Promise.all([
           fetch('/api/user/me'),
-          fetch('/api/portfolio/holdings'),
-          fetch('/api/accounts')
+          fetch('/api/portfolio/holdings')
         ]);
 
         if (userResponse.ok) {
@@ -112,11 +110,6 @@ export default function DashboardPage() {
           const data = await holdingsResponse.json();
           setHoldings(data.holdings);
           setSummary(data.summary);
-        }
-
-        if (accountsResponse.ok) {
-          const data = await accountsResponse.json();
-          setAccounts(data.accounts);
         }
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error);
@@ -181,6 +174,48 @@ export default function DashboardPage() {
     };
   }, [summary, updatedHoldings]);
 
+  // 오늘의 전체 손익 계산
+  const todaySummary = useMemo(() => {
+    if (!updatedHoldings.length || !updatedSummary) return { 
+      totalTodayProfitLoss: 0, 
+      totalTodayChangePercent: 0, 
+      gainersCount: 0, 
+      losersCount: 0,
+      unchangedCount: 0
+    };
+
+    let totalTodayProfitLoss = 0;
+    let gainersCount = 0;
+    let losersCount = 0;
+    let unchangedCount = 0;
+
+    updatedHoldings.forEach(holding => {
+      const stockRealTimeData = realTimeData[holding.stockCode];
+      const todayChange = stockRealTimeData?.regularMarketChange || 0;
+      const todayChangePercent = stockRealTimeData?.regularMarketChangePercent || 0;
+      
+      // 보유 수량을 고려한 오늘의 손익 (원화 기준)
+      const todayProfitLoss = todayChange * holding.quantity * (summary?.exchangeRate || 1380);
+      totalTodayProfitLoss += todayProfitLoss;
+
+      if (todayChangePercent > 0) gainersCount++;
+      else if (todayChangePercent < 0) losersCount++;
+      else unchangedCount++;
+    });
+
+    const totalTodayChangePercent = updatedSummary.totalValue > 0 
+      ? (totalTodayProfitLoss / (updatedSummary.totalValue - totalTodayProfitLoss)) * 100 
+      : 0;
+
+    return {
+      totalTodayProfitLoss,
+      totalTodayChangePercent,
+      gainersCount,
+      losersCount,
+      unchangedCount
+    };
+  }, [updatedHoldings, realTimeData, summary, updatedSummary]);
+
   // 오늘의 상승/하락 종목 (TOP 3) - 오늘 하루 변화율 기준
   const todayMovers = useMemo(() => {
     if (!updatedHoldings.length) return { gainers: [], losers: [] };
@@ -212,17 +247,6 @@ export default function DashboardPage() {
     };
   }, [updatedHoldings, realTimeData, summary]);
 
-  // 계좌 표시명 생성 함수
-  const getAccountDisplayName = (account: Account) => {
-    if (account.nickname) {
-      return `${account.nickname} (${account.institution.name})`;
-    }
-    const maskedAccountNumber = account.accountNumber.length > 8 
-      ? `${account.accountNumber.slice(0, 4)}****${account.accountNumber.slice(-4)}`
-      : account.accountNumber;
-    return `${account.institution.name} - ${maskedAccountNumber}`;
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -244,10 +268,27 @@ export default function DashboardPage() {
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         {/* 헤더 */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">
-            🏠 대시보드 {user?.username && <span className="text-blue-600">- {user.username}님</span>}
-          </h1>
-          <p className="text-gray-600">포트폴리오 현황을 한눈에 확인하세요</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                📊 실시간 대시보드 {user?.username && <span className="text-blue-600">- {user.username}님</span>}
+              </h1>
+              <p className="text-gray-600">오늘의 포트폴리오 현황과 실시간 시장 동향</p>
+            </div>
+            <div className="text-right">
+              <div className="text-sm text-gray-500">
+                마지막 업데이트: {stockLastUpdate ? new Date(stockLastUpdate).toLocaleTimeString('ko-KR') : '업데이트 없음'}
+              </div>
+              <div className="flex items-center justify-end mt-1">
+                <div className={`w-2 h-2 rounded-full mr-2 ${
+                  stockDataLoading ? 'bg-blue-500 animate-pulse' : 'bg-green-500'
+                }`}></div>
+                <span className="text-xs text-gray-500">
+                  {stockDataLoading ? '실시간 업데이트 중...' : '실시간 연결됨'}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {dataError && (
@@ -261,87 +302,88 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* 포트폴리오 요약 카드 */}
+        {/* 오늘의 포트폴리오 현황 */}
         {updatedSummary && (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            {/* 오늘의 총 손익 */}
+            <div className="bg-gradient-to-r from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-lg shadow p-6 border-l-4 border-orange-400">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-300">총 평가금액</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    ₩{updatedSummary.totalValue.toLocaleString()}
-                  </p>
-                  {stockDataLoading && (
-                    <p className="text-xs text-blue-600 mt-1">실시간 업데이트 중...</p>
-                  )}
-                </div>
-                <div className="p-3 bg-blue-100 rounded-full">
-                  <svg className="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-300">총 투자금액</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    ₩{updatedSummary.totalInvestment.toLocaleString()}
-                  </p>
-                </div>
-                <div className="p-3 bg-gray-100 rounded-full">
-                  <svg className="h-6 w-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-4m-5 0H3m2 0h3M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-300">총 손익</p>
+                  <p className="text-sm font-medium text-orange-800 dark:text-orange-300">오늘의 손익</p>
                   <p className={`text-2xl font-bold ${
-                    updatedSummary.totalProfitLoss >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                    todaySummary.totalTodayProfitLoss >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
                   }`}>
-                    {updatedSummary.totalProfitLoss >= 0 ? '+' : ''}₩{updatedSummary.totalProfitLoss.toLocaleString()}
+                    {todaySummary.totalTodayProfitLoss >= 0 ? '+' : ''}₩{todaySummary.totalTodayProfitLoss.toLocaleString()}
+                  </p>
+                  <p className={`text-sm ${
+                    todaySummary.totalTodayChangePercent >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                  }`}>
+                    {todaySummary.totalTodayChangePercent >= 0 ? '+' : ''}{todaySummary.totalTodayChangePercent.toFixed(2)}%
                   </p>
                 </div>
-                <div className={`p-3 rounded-full ${
-                  updatedSummary.totalProfitLoss >= 0 ? 'bg-red-100' : 'bg-blue-100'
-                }`}>
-                  <svg className={`h-6 w-6 ${
-                    updatedSummary.totalProfitLoss >= 0 ? 'text-red-600' : 'text-blue-600'
-                  }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    {updatedSummary.totalProfitLoss >= 0 ? (
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                    ) : (
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
-                    )}
+                <div className="p-3 bg-orange-200 dark:bg-orange-700/50 rounded-full">
+                  <svg className="h-6 w-6 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow p-6">
+            {/* 상승 종목 수 */}
+            <div className="bg-red-50 dark:bg-red-900/20 rounded-lg shadow p-6 border-l-4 border-red-400">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">수익률</p>
-                  <p className={`text-2xl font-bold ${
-                    updatedSummary.totalProfitLossPercentage >= 0 ? 'text-red-600' : 'text-blue-600'
-                  }`}>
-                    {updatedSummary.totalProfitLossPercentage >= 0 ? '+' : ''}{updatedSummary.totalProfitLossPercentage.toFixed(2)}%
+                  <p className="text-sm font-medium text-red-800 dark:text-red-300">상승 종목</p>
+                  <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                    {todaySummary.gainersCount}
+                  </p>
+                  <p className="text-sm text-red-600 dark:text-red-400">
+                    총 {updatedHoldings.length}종목 중
                   </p>
                 </div>
-                <div className={`p-3 rounded-full ${
-                  updatedSummary.totalProfitLossPercentage >= 0 ? 'bg-red-100 dark:bg-red-900/20' : 'bg-blue-100 dark:bg-blue-900/20'
-                }`}>
-                  <svg className={`h-6 w-6 ${
-                    updatedSummary.totalProfitLossPercentage >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
-                  }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                <div className="p-3 bg-red-200 dark:bg-red-700/50 rounded-full">
+                  <svg className="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* 하락 종목 수 */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg shadow p-6 border-l-4 border-blue-400">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300">하락 종목</p>
+                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {todaySummary.losersCount}
+                  </p>
+                  <p className="text-sm text-blue-600 dark:text-blue-400">
+                    총 {updatedHoldings.length}종목 중
+                  </p>
+                </div>
+                <div className="p-3 bg-blue-200 dark:bg-blue-700/50 rounded-full">
+                  <svg className="h-6 w-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* 보합 종목 수 */}
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg shadow p-6 border-l-4 border-gray-400">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">보합 종목</p>
+                  <p className="text-2xl font-bold text-gray-600 dark:text-gray-400">
+                    {todaySummary.unchangedCount}
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    총 {updatedHoldings.length}종목 중
+                  </p>
+                </div>
+                <div className="p-3 bg-gray-200 dark:bg-gray-700 rounded-full">
+                  <svg className="h-6 w-6 text-gray-600 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6" />
                   </svg>
                 </div>
               </div>
@@ -442,7 +484,7 @@ export default function DashboardPage() {
                   <svg className="h-5 w-5 text-purple-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
-                  <span className="font-medium text-gray-900">포트폴리오 분석</span>
+                  <span className="font-medium text-gray-900">전체 포트폴리오 분석</span>
                 </div>
                 <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -452,46 +494,33 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 계좌별 현황 */}
-        {accounts.length > 0 && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">💼 계좌별 현황</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {accounts.map((account) => {
-                const accountHoldings = updatedHoldings.filter(h => h.account.id === account.id);
-                const accountValue = accountHoldings.reduce((sum, h) => sum + h.totalValueKRW, 0);
-                const accountInvestment = accountHoldings.reduce((sum, h) => sum + h.totalInvestmentKRW, 0);
-                const accountProfitLoss = accountValue - accountInvestment;
-                const accountProfitLossPercentage = accountInvestment > 0 ? (accountProfitLoss / accountInvestment) * 100 : 0;
-
-                return (
-                  <div key={account.id} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-                    <h4 className="font-medium text-gray-900 dark:text-white mb-2">{getAccountDisplayName(account)}</h4>
-                    <div className="space-y-1 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-gray-400">종목 수:</span>
-                        <span className="font-medium text-gray-900 dark:text-white">{accountHoldings.length}개</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-gray-400">평가금액:</span>
-                        <span className="font-medium text-gray-900 dark:text-white">₩{accountValue.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-gray-400">손익:</span>
-                        <span className={`font-medium ${
-                          accountProfitLoss >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
-                        }`}>
-                          {accountProfitLoss >= 0 ? '+' : ''}₩{accountProfitLoss.toLocaleString()}
-                          ({accountProfitLossPercentage.toFixed(2)}%)
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+        {/* 실시간 업데이트 상태 */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">� 실시간 데이터 상태</h3>
+              <div className="flex items-center space-x-4 text-sm">
+                <div className="flex items-center">
+                  <div className={`w-3 h-3 rounded-full mr-2 ${
+                    stockDataLoading ? 'bg-blue-500 animate-pulse' : 'bg-green-500'
+                  }`}></div>
+                  <span className="text-gray-600 dark:text-gray-400">
+                    {stockDataLoading ? '업데이트 중...' : '연결됨'}
+                  </span>
+                </div>
+                <div className="text-gray-500 dark:text-gray-400">
+                  업데이트 주기: 5분
+                </div>
+                <div className="text-gray-500 dark:text-gray-400">
+                  추적 종목: {holdingSymbols.length}개
+                </div>
+              </div>
+            </div>
+            <div className="text-right text-sm text-gray-500 dark:text-gray-400">
+              마지막 업데이트: {stockLastUpdate ? new Date(stockLastUpdate).toLocaleString('ko-KR') : '업데이트 없음'}
             </div>
           </div>
-        )}
+        </div>
 
         {/* 데이터 업데이트 정보 */}
         {stockLastUpdate && (
