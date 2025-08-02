@@ -88,7 +88,7 @@ export default function AnalyticsPage() {
   } = useRealTimeStockData({
     symbols: stockCodes,
     intervalMs: 180000, // 3분
-    enabled: true
+    enabled: stockCodes.length > 0 // 항상 활성화 (주말에도 금요일 종가 기준)
   });
 
   // 계좌 데이터 가져오기

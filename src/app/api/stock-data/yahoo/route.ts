@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAfterMarketClose, getPreviousTradingDay } from '@/utils/dateUtils';
+import { isAfterMarketClose } from '@/utils/dateUtils';
 
 // 한국 종목 코드를 Yahoo Finance 형식으로 변환
 function formatKoreanSymbol(symbol: string): string {
@@ -149,23 +149,27 @@ export async function GET(request: NextRequest) {
     
     if (afterMarketClose) {
       try {
-        // 이전 영업일 계산
-        const previousTradingDay = getPreviousTradingDay(symbol);
-        const previousDayStart = Math.floor(previousTradingDay.getTime() / 1000);
-        const previousDayEnd = previousDayStart + 24 * 60 * 60; // 하루 추가
+        // 장 종료 후에는 더 이전 데이터를 가져와야 함 (2-3일 전까지)
+        const today = new Date();
+        const threeDaysAgo = new Date(today);
+        threeDaysAgo.setDate(today.getDate() - 5); // 주말 고려해서 5일 전부터
         
-        console.log(`📅 Fetching previous trading day data for ${symbol}:`, {
-          previousTradingDay: previousTradingDay.toISOString().split('T')[0],
-          previousDayStart,
-          previousDayEnd,
+        const period1 = Math.floor(threeDaysAgo.getTime() / 1000);
+        const period2 = Math.floor(today.getTime() / 1000);
+        
+        console.log(`📅 Fetching recent historical data for ${symbol}:`, {
+          threeDaysAgo: threeDaysAgo.toISOString().split('T')[0],
+          today: today.toISOString().split('T')[0],
+          period1,
+          period2,
           afterMarketClose
         });
         
-        // 이전 영업일 차트 데이터 가져오기
-        const prevDayUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${formattedSymbol}?period1=${previousDayStart}&period2=${previousDayEnd}&interval=1d`;
-        console.log(`🔗 Previous day URL: ${prevDayUrl}`);
+        // 최근 3-5일 차트 데이터 가져오기
+        const historicalUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${formattedSymbol}?period1=${period1}&period2=${period2}&interval=1d`;
+        console.log(`🔗 Historical data URL: ${historicalUrl}`);
         
-        const prevDayResponse = await fetch(prevDayUrl, {
+        const historicalResponse = await fetch(historicalUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': 'application/json, text/plain, */*',
@@ -174,46 +178,49 @@ export async function GET(request: NextRequest) {
           }
         });
         
-        console.log(`📊 Previous day response status: ${prevDayResponse.status}`);
+        console.log(`📊 Historical response status: ${historicalResponse.status}`);
         
-        if (prevDayResponse.ok) {
-          const prevDayData = await prevDayResponse.json();
-          console.log(`📈 Previous day raw data for ${symbol}:`, JSON.stringify(prevDayData, null, 2));
+        if (historicalResponse.ok) {
+          const historicalData = await historicalResponse.json();
+          console.log(`📈 Historical raw data for ${symbol}:`, JSON.stringify(historicalData, null, 2));
           
-          const prevResult = prevDayData.chart?.result?.[0];
-          if (prevResult) {
-            // indicators.quote[0].close 배열에서 이전 영업일의 실제 종가 가져오기
-            const closeArray = prevResult.indicators?.quote?.[0]?.close;
-            let previousDayClose = null;
+          const result = historicalData.chart?.result?.[0];
+          if (result) {
+            const timestamps = result.timestamp || [];
+            const closeArray = result.indicators?.quote?.[0]?.close || [];
             
-            if (closeArray && closeArray.length > 0) {
-              // 배열의 첫 번째 값이 실제 이전 영업일 종가
-              previousDayClose = closeArray[0];
-              console.log(`📊 Close array for ${symbol}:`, closeArray, `Using first value: ${previousDayClose}`);
-            } else if (prevResult.meta) {
-              // 폴백: meta에서 chartPreviousClose 사용
-              previousDayClose = prevResult.meta.chartPreviousClose || prevResult.meta.previousClose;
-              console.log(`📊 Using meta fallback for ${symbol}: ${previousDayClose}`);
-            }
+            console.log(`📊 Historical data for ${symbol}:`, {
+              timestamps: timestamps.map((t: number) => new Date(t * 1000).toISOString().split('T')[0]),
+              closes: closeArray
+            });
             
-            if (previousDayClose && previousDayClose > 0) {
-              previousTradingDayData = {
-                close: previousDayClose,
-                date: previousTradingDay.toISOString().split('T')[0]
-              };
+            // 장 종료 후에는 최신 데이터가 당일이므로, 그 이전 데이터(실제 전일)를 찾아야 함
+            if (closeArray.length >= 2) {
+              // 배열에서 뒤에서 두 번째(실제 전일 종가) 사용
+              const actualPreviousClose = closeArray[closeArray.length - 2];
+              const actualPreviousDate = new Date(timestamps[timestamps.length - 2] * 1000);
               
-              console.log(`✅ Previous trading day data for ${symbol}:`, previousTradingDayData);
+              if (actualPreviousClose && actualPreviousClose > 0) {
+                previousTradingDayData = {
+                  close: actualPreviousClose,
+                  date: actualPreviousDate.toISOString().split('T')[0]
+                };
+                
+                console.log(`✅ Found actual previous trading day data for ${symbol}:`, previousTradingDayData);
+              } else {
+                console.warn(`⚠️ Invalid previous close value for ${symbol}: ${actualPreviousClose}`);
+              }
             } else {
-              console.warn(`⚠️ No valid previous day close found for ${symbol}`);
+              console.warn(`⚠️ Not enough historical data for ${symbol}, array length: ${closeArray.length}`);
             }
           } else {
-            console.warn(`⚠️ No result data in previous day response for ${symbol}`);
+            console.warn(`⚠️ No result data in historical response for ${symbol}`);
           }
         } else {
-          console.warn(`❌ Failed to fetch previous day data: ${prevDayResponse.status} ${prevDayResponse.statusText}`);
+          console.warn(`❌ Failed to fetch historical data: ${historicalResponse.status} ${historicalResponse.statusText}`);
         }
       } catch (error) {
-        console.error(`💥 Error fetching previous trading day data for ${symbol}:`, error);
+        console.error(`💥 Error fetching historical data for ${symbol}:`, error);
       }
     } else {
       console.log(`⏰ Market is open for ${symbol}, skipping previous trading day fetch`);

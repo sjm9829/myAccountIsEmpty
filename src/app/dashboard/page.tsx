@@ -1,611 +1,539 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useState, useEffect, useCallback } from 'react';
 import Navigation from '@/components/Navigation';
-import { useRealTimeStockData } from '@/hooks/useRealTimeStockData';
 
-interface User {
-  id: string;
-  username: string;
-  email: string;
+// 간단한 타입 정의
+interface PortfolioSnapshot {
+  totalValue: number;
+  todayChange: number;
+  todayChangePercent: number;
+  totalReturn: number;
+  totalReturnPercent: number;
 }
 
-interface Institution {
-  id: string;
-  name: string;
-  type: string;
-}
-
-interface Account {
-  id: string;
-  accountNumber: string;
-  accountType: string;
-  nickname?: string;
-  institution: Institution;
-}
-
-interface Holding {
-  id: string;
+interface StockItem {
   stockCode: string;
   stockName: string;
-  quantity: number;
   currentPrice: number;
-  totalValue: number;
-  totalInvestment: number;
-  profitLoss: number;
-  profitLossPercentage: number;
-  currency: string;
-  totalValueKRW: number;
-  totalInvestmentKRW: number;
-  profitLossKRW: number;
-  account: Account;
-}
-
-interface HoldingWithTodayChange extends Holding {
-  todayChangePercent: number;
   todayChange: number;
-  todayProfitLoss: number;
+  todayChangePercent: number;
+  quantity: number;
+  profitLoss: number;
+  profitLossPercent: number;
+  currency: string;
 }
 
-interface PortfolioSummary {
-  totalValue: number;
-  totalInvestment: number;
-  totalProfitLoss: number;
-  totalProfitLossPercentage: number;
-  exchangeRate: number;
-  byCurrency: Record<string, {
-    totalValue: number;
-    totalInvestment: number;
-    totalProfitLoss: number;
-    count: number;
-  }>;
+interface MarketIndex {
+  name: string;
+  value: number;
+  change: number;
+  changePercent: number;
 }
 
-export default function DashboardPage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+interface TodayAlert {
+  id: string;
+  type: 'surge' | 'drop' | 'dividend' | 'news' | 'earnings' | 'economic';
+  stockName: string;
+  message: string;
+  value?: number;
+  priority?: 'high' | 'medium' | 'low';
+  country?: string; // 국가 정보 추가
+  date?: string; // 날짜 정보 추가
+}
+
+export default function SimpleDashboard() {
+  const [portfolio, setPortfolio] = useState<PortfolioSnapshot | null>(null);
+  const [topStocks, setTopStocks] = useState<StockItem[]>([]);
+  const [marketIndices, setMarketIndices] = useState<MarketIndex[]>([]);
+  const [todayAlerts, setTodayAlerts] = useState<TodayAlert[]>([]);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [isMarketOpen, setIsMarketOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [dataError, setDataError] = useState('');
-  const router = useRouter();
+  const [isUpdatingPortfolio, setIsUpdatingPortfolio] = useState(false);
+  const [isUpdatingIndices, setIsUpdatingIndices] = useState(false);
+  const [isUpdatingEvents, setIsUpdatingEvents] = useState(false);
 
-  // 보유 종목들의 심볼 추출
-  const holdingSymbols = useMemo(() => {
-    const symbols = [...new Set(holdings.map(holding => holding.stockCode))];
-    return symbols;
-  }, [holdings]);
-
-  // 실시간 주가 데이터
-  const { 
-    stockData: realTimeData, 
-    lastUpdate: stockLastUpdate,
-    isLoading: stockDataLoading,
-    error: stockError
-  } = useRealTimeStockData({
-    symbols: holdingSymbols,
-    intervalMs: 300000, // 5분마다 업데이트
-    enabled: holdingSymbols.length > 0
-  });
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setDataError('');
-        const [userResponse, holdingsResponse] = await Promise.all([
-          fetch('/api/user/me'),
-          fetch('/api/portfolio/holdings')
-        ]);
-
-        if (userResponse.ok) {
-          const userData = await userResponse.json();
-          setUser(userData.user);
-        } else {
-          router.push('/login');
-          return;
-        }
-
-        if (holdingsResponse.ok) {
-          const data = await holdingsResponse.json();
-          setHoldings(data.holdings);
-          setSummary(data.summary);
-        }
-      } catch (error) {
-        console.error('Failed to fetch dashboard data:', error);
-        setDataError('대시보드 데이터를 불러오는데 실패했습니다.');
-      } finally {
-        setIsLoading(false);
+  // 포트폴리오 데이터 업데이트
+  const updatePortfolioData = useCallback(async () => {
+    try {
+      setIsUpdatingPortfolio(true);
+      const holdingsRes = await fetch('/api/portfolio/holdings', {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (holdingsRes.status === 401) {
+        window.location.href = '/login';
+        return;
       }
-    };
+      
+      if (holdingsRes.ok) {
+        const data = await holdingsRes.json();
+        
+        // 포트폴리오 스냅샷 설정
+        if (data.summary) {
+          setPortfolio({
+            totalValue: Math.round(data.summary.totalValue || 0),
+            todayChange: Math.round(data.summary.totalTodayChange || 0),
+            todayChangePercent: Number((data.summary.totalTodayChangePercent || 0).toFixed(2)),
+            totalReturn: Math.round(data.summary.totalProfitLoss || 0),
+            totalReturnPercent: Number((data.summary.totalProfitLossPercentage || 0).toFixed(2))
+          });
+        }
+        
+        // 보유 종목 데이터 업데이트
+        const stocks = data.holdings?.map((item: {
+          stockCode: string;
+          stockName: string;
+          currentPrice: number;
+          dailyChangePercent: number;
+          quantity: number;
+          profitLoss: number;
+          profitLossPercentage: number;
+          currency?: string;
+          dailyChange?: number;
+        }) => ({
+          stockCode: item.stockCode,
+          stockName: item.stockName,
+          currentPrice: item.currentPrice || 0,
+          todayChange: item.dailyChange || ((item.currentPrice || 0) * ((item.dailyChangePercent || 0) / 100) / (1 + ((item.dailyChangePercent || 0) / 100))), // 종목 자체의 등락금액
+          todayChangePercent: item.dailyChangePercent || 0,
+          quantity: item.quantity,
+          profitLoss: item.profitLoss || 0,
+          profitLossPercent: item.profitLossPercentage || 0,
+          currency: item.currency || 'KRW' // 기본값을 KRW로 설정
+        })) || [];
+        
+        // 당일 수익률 기준 내림차순 정렬
+        stocks.sort((a: StockItem, b: StockItem) => b.todayChangePercent - a.todayChangePercent);
+        
+        setTopStocks(stocks);
+        
+        // 오늘의 알림 생성 - 기존 급등/급락 알림만 먼저 생성
+        const alerts: TodayAlert[] = [];
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        
+        // 급등/급락 종목 확인
+        stocks.forEach((stock: StockItem) => {
+          if (stock.todayChangePercent >= 5) {
+            alerts.push({
+              id: `surge-${stock.stockCode}`,
+              type: 'surge',
+              stockName: stock.stockName,
+              message: `+${stock.todayChangePercent.toFixed(1)}% 급등`,
+              value: stock.todayChangePercent,
+              priority: 'high',
+              date: todayStr
+            });
+          } else if (stock.todayChangePercent <= -4) {
+            alerts.push({
+              id: `drop-${stock.stockCode}`,
+              type: 'drop',
+              stockName: stock.stockName,
+              message: `${stock.todayChangePercent.toFixed(1)}% 급락`,
+              value: stock.todayChangePercent,
+              priority: 'high',
+              date: todayStr
+            });
+          }
+        });
 
-    fetchData();
-  }, [router]);
-
-  // 실시간 데이터로 업데이트된 보유종목
-  const updatedHoldings = useMemo(() => {
-    if (!realTimeData || Object.keys(realTimeData).length === 0) {
-      return holdings;
+        // 임시로 급등/급락 알림만 설정 (이벤트 알림은 별도 함수에서 추가)
+        setTodayAlerts(alerts); // slice 제거
+        
+      }
+    } catch (error) {
+      console.error('포트폴리오 데이터 업데이트 실패:', error);
+    } finally {
+      setIsUpdatingPortfolio(false);
     }
+  }, []);
 
-    return holdings.map(holding => {
-      const realtimeStock = realTimeData[holding.stockCode];
-      if (realtimeStock && realtimeStock.regularMarketPrice !== undefined) {
-        const currentPrice = realtimeStock.regularMarketPrice;
-        const totalValue = holding.quantity * currentPrice;
-        const profitLoss = totalValue - holding.totalInvestment;
-        const profitLossPercentage = holding.totalInvestment > 0 
-          ? (profitLoss / holding.totalInvestment) * 100 
-          : 0;
-
-        const exchangeRate = summary?.exchangeRate || 1300;
-        const totalValueKRW = holding.currency === 'USD' ? totalValue * exchangeRate : totalValue;
-        const profitLossKRW = holding.currency === 'USD' ? profitLoss * exchangeRate : profitLoss;
-
-        return {
-          ...holding,
-          currentPrice,
-          totalValue,
-          profitLoss,
-          profitLossPercentage,
-          totalValueKRW,
-          profitLossKRW
-        };
+  // 이벤트 알림 업데이트
+  const updateEventAlerts = useCallback(async () => {
+    try {
+      setIsUpdatingEvents(true);
+      const response = await fetch('/api/events', {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          // 기존 급등/급락 알림과 이벤트 알림 합치기
+          setTodayAlerts(prevAlerts => {
+            const combinedAlerts = [...prevAlerts, ...result.data];
+            
+            // 급등/급락 알림을 최상단 고정, 그 외는 날짜 오름차순 정렬
+            return combinedAlerts
+              .sort((a, b) => {
+                // 급등/급락 알림은 최상단 고정
+                const isAUrgent = a.type === 'surge' || a.type === 'drop';
+                const isBUrgent = b.type === 'surge' || b.type === 'drop';
+                
+                if (isAUrgent && !isBUrgent) return -1;
+                if (!isAUrgent && isBUrgent) return 1;
+                
+                // 둘 다 급등/급락이거나 둘 다 일반 알림인 경우 날짜 오름차순
+                if (a.date && b.date) {
+                  return new Date(a.date).getTime() - new Date(b.date).getTime();
+                }
+                
+                // 날짜가 없는 경우 기본 정렬
+                return 0;
+              });
+          });
+        }
+      } else {
+        console.error('이벤트 API 호출 실패:', response.status);
       }
-      return holding;
-    });
-  }, [holdings, realTimeData, summary?.exchangeRate]);
+    } catch (error) {
+      console.error('이벤트 알림 업데이트 실패:', error);
+    } finally {
+      setIsUpdatingEvents(false);
+    }
+  }, []);
 
-  // 업데이트된 요약 정보
-  const updatedSummary = useMemo(() => {
-    if (!summary || updatedHoldings.length === 0) return summary;
-
-    const totalValueKRW = updatedHoldings.reduce((sum, holding) => sum + holding.totalValueKRW, 0);
-    const totalInvestmentKRW = updatedHoldings.reduce((sum, holding) => sum + holding.totalInvestmentKRW, 0);
-    const totalProfitLossKRW = totalValueKRW - totalInvestmentKRW;
-    const totalProfitLossPercentage = totalInvestmentKRW > 0 ? (totalProfitLossKRW / totalInvestmentKRW) * 100 : 0;
-
-    return {
-      ...summary,
-      totalValue: totalValueKRW,
-      totalInvestment: totalInvestmentKRW,
-      totalProfitLoss: totalProfitLossKRW,
-      totalProfitLossPercentage
-    };
-  }, [summary, updatedHoldings]);
-
-  // 오늘의 전체 손익 계산
-  const todaySummary = useMemo(() => {
-    if (!updatedHoldings.length || !updatedSummary) return { 
-      totalTodayProfitLoss: 0, 
-      totalTodayChangePercent: 0, 
-      gainersCount: 0, 
-      losersCount: 0,
-      unchangedCount: 0
-    };
-
-    let totalTodayProfitLoss = 0;
-    let gainersCount = 0;
-    let losersCount = 0;
-    let unchangedCount = 0;
-
-    updatedHoldings.forEach(holding => {
-      const stockRealTimeData = realTimeData[holding.stockCode];
-      const todayChange = stockRealTimeData?.regularMarketChange || 0;
-      const todayChangePercent = stockRealTimeData?.regularMarketChangePercent || 0;
+  // 시장 지수 업데이트
+  const updateMarketIndices = useCallback(async () => {
+    try {
+      setIsUpdatingIndices(true);
+      const response = await fetch('/api/market-indices', {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      });
       
-      // 보유 수량을 고려한 오늘의 손익 (원화 기준)
-      const todayProfitLoss = todayChange * holding.quantity * (summary?.exchangeRate || 1380);
-      totalTodayProfitLoss += todayProfitLoss;
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          setMarketIndices(result.data);
+        } else {
+          console.error('주요 지수 데이터 형식 오류:', result);
+          setMarketIndices([]);
+        }
+      } else {
+        console.error('주요 지수 API 호출 실패:', response.status);
+        setMarketIndices([]);
+      }
+    } catch (error) {
+      console.error('시장 지수 업데이트 실패:', error);
+      setMarketIndices([]);
+    } finally {
+      setIsUpdatingIndices(false);
+    }
+  }, []);
 
-      if (todayChangePercent > 0) gainersCount++;
-      else if (todayChangePercent < 0) losersCount++;
-      else unchangedCount++;
-    });
 
-    const totalTodayChangePercent = updatedSummary.totalValue > 0 
-      ? (totalTodayProfitLoss / (updatedSummary.totalValue - totalTodayProfitLoss)) * 100 
-      : 0;
+  const fetchInitialData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      await Promise.all([
+        updatePortfolioData(),
+        updateMarketIndices()
+      ]);
+      // 포트폴리오 데이터 로딩 후 이벤트 알림 업데이트
+      await updateEventAlerts();
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error('초기 데이터 로딩 실패:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [updatePortfolioData, updateMarketIndices, updateEventAlerts]);
 
-    return {
-      totalTodayProfitLoss,
-      totalTodayChangePercent,
-      gainersCount,
-      losersCount,
-      unchangedCount
+  // 개별 섹션 업데이트 (비동기)
+  const updateAllSections = useCallback(async () => {
+    try {
+      // 각 섹션을 병렬로 업데이트
+      await Promise.all([
+        updatePortfolioData(),
+        updateMarketIndices()
+      ]);
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error('섹션 업데이트 실패:', error);
+    }
+  }, [updatePortfolioData, updateMarketIndices]);
+
+  // 초기 데이터 로딩
+  useEffect(() => {
+    fetchInitialData();
+  }, [fetchInitialData]);
+
+  // 시장 상태 확인
+  useEffect(() => {
+    const checkMarketStatus = () => {
+      const now = new Date();
+      const hour = now.getHours();
+      const koreanMarketOpen = hour >= 9 && hour < 18;
+      const usMarketOpen = hour >= 22 || hour < 6;
+      setIsMarketOpen(koreanMarketOpen || usMarketOpen);
     };
-  }, [updatedHoldings, realTimeData, summary, updatedSummary]);
 
-  // 오늘의 상승/하락 종목 (TOP 3) - 오늘 하루 변화율 기준
-  const todayMovers = useMemo(() => {
-    if (!updatedHoldings.length) return { gainers: [], losers: [] };
+    checkMarketStatus();
+    const statusInterval = setInterval(checkMarketStatus, 60000);
+    return () => clearInterval(statusInterval);
+  }, []);
 
-    // 실시간 데이터에서 오늘의 변화율을 가져와서 계산
-    const holdingsWithTodayChange = updatedHoldings.map(holding => {
-      const stockRealTimeData = realTimeData[holding.stockCode];
-      const todayChangePercent = stockRealTimeData?.regularMarketChangePercent || 0;
-      const todayChange = stockRealTimeData?.regularMarketChange || 0;
-      
-      // 보유 수량을 고려한 오늘의 손익 (원화 기준)
-      const todayProfitLoss = todayChange * holding.quantity * (summary?.exchangeRate || 1380);
-      
-      return {
-        ...holding,
-        todayChangePercent,
-        todayChange,
-        todayProfitLoss
-      } as HoldingWithTodayChange;
-    });
+  // 이벤트 알림 정기 업데이트 (30분마다)
+  useEffect(() => {
+    const eventUpdateInterval = setInterval(() => {
+      updateEventAlerts();
+    }, 30 * 60 * 1000); // 30분 = 30 * 60 * 1000ms
 
-    const sortedByTodayChange = holdingsWithTodayChange
-      .filter(holding => holding.todayChangePercent !== 0)
-      .sort((a, b) => b.todayChangePercent - a.todayChangePercent);
-
-    return {
-      gainers: sortedByTodayChange.filter(h => h.todayChangePercent > 0).slice(0, 3),
-      losers: sortedByTodayChange.filter(h => h.todayChangePercent < 0).slice(-3).reverse()
-    };
-  }, [updatedHoldings, realTimeData, summary]);
+    return () => clearInterval(eventUpdateInterval);
+  }, [updateEventAlerts]);
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">대시보드 데이터를 불러오는 중...</p>
-          </div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">포트폴리오 로딩 중...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navigation />
       
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
-        {/* 헤더 */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                📊 실시간 대시보드 {user?.username && <span className="text-blue-600">- {user.username}님</span>}
-              </h1>
-              <p className="text-gray-600">오늘의 포트폴리오 현황과 실시간 시장 동향</p>
-            </div>
-            <div className="text-right">
-              <div className="text-sm text-gray-500">
-                마지막 업데이트: {stockLastUpdate ? new Date(stockLastUpdate).toLocaleTimeString('ko-KR') : '업데이트 없음'}
-              </div>
-              <div className="flex items-center justify-end mt-1">
-                <div className={`w-2 h-2 rounded-full mr-2 ${
-                  stockDataLoading ? 'bg-blue-500 animate-pulse' : 'bg-green-500'
-                }`}></div>
-                <span className="text-xs text-gray-500">
-                  {stockDataLoading ? '실시간 업데이트 중...' : '실시간 연결됨'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {dataError && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
-            <div className="flex items-center">
-              <svg className="h-5 w-5 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-red-700">{dataError}</span>
-            </div>
-          </div>
-        )}
-
-        {/* 오늘의 포트폴리오 현황 */}
-        {updatedSummary && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            {/* 오늘의 총 손익 */}
-            <div className="bg-gradient-to-r from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-lg shadow p-6 border-l-4 border-orange-400">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-orange-800 dark:text-orange-300">오늘의 손익</p>
-                  <p className={`text-2xl font-bold ${
-                    todaySummary.totalTodayProfitLoss >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
-                  }`}>
-                    {todaySummary.totalTodayProfitLoss >= 0 ? '+' : ''}₩{todaySummary.totalTodayProfitLoss.toLocaleString()}
-                  </p>
-                  <p className={`text-sm ${
-                    todaySummary.totalTodayChangePercent >= 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
-                  }`}>
-                    {todaySummary.totalTodayChangePercent >= 0 ? '+' : ''}{todaySummary.totalTodayChangePercent.toFixed(2)}%
-                  </p>
-                </div>
-                <div className="p-3 bg-orange-200 dark:bg-orange-700/50 rounded-full">
-                  <svg className="h-6 w-6 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* 상승 종목 수 */}
-            <div className="bg-red-50 dark:bg-red-900/20 rounded-lg shadow p-6 border-l-4 border-red-400">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-red-800 dark:text-red-300">상승 종목</p>
-                  <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                    {todaySummary.gainersCount}
-                  </p>
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    총 {updatedHoldings.length}종목 중
-                  </p>
-                </div>
-                <div className="p-3 bg-red-200 dark:bg-red-700/50 rounded-full">
-                  <svg className="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* 하락 종목 수 */}
-            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg shadow p-6 border-l-4 border-blue-400">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300">하락 종목</p>
-                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                    {todaySummary.losersCount}
-                  </p>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">
-                    총 {updatedHoldings.length}종목 중
-                  </p>
-                </div>
-                <div className="p-3 bg-blue-200 dark:bg-blue-700/50 rounded-full">
-                  <svg className="h-6 w-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* 보합 종목 수 */}
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg shadow p-6 border-l-4 border-gray-400">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">보합 종목</p>
-                  <p className="text-2xl font-bold text-gray-600 dark:text-gray-400">
-                    {todaySummary.unchangedCount}
-                  </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    총 {updatedHoldings.length}종목 중
-                  </p>
-                </div>
-                <div className="p-3 bg-gray-200 dark:bg-gray-700 rounded-full">
-                  <svg className="h-6 w-6 text-gray-600 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
-          {/* 오늘의 상승 종목 */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
-              📈 오늘의 상승 종목
-            </h3>
-            {todayMovers.gainers.length > 0 ? (
-              <div className="space-y-3">
-                {todayMovers.gainers.map((holding) => (
-                  <div key={holding.id} className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/10 rounded-lg">
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{holding.stockName}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{holding.stockCode}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-red-600 dark:text-red-400">+{holding.todayChangePercent.toFixed(2)}%</p>
-                      <p className="text-sm text-red-600 dark:text-red-400">+₩{holding.todayProfitLoss.toLocaleString()}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 dark:text-gray-400 text-center py-4">오늘 상승한 종목이 없습니다</p>
-            )}
-          </div>
-
-          {/* 오늘의 하락 종목 */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
-              📉 오늘의 하락 종목
-            </h3>
-            {todayMovers.losers.length > 0 ? (
-              <div className="space-y-3">
-                {todayMovers.losers.map((holding) => (
-                  <div key={holding.id} className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg">
-                    <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{holding.stockName}</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{holding.stockCode}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-blue-600 dark:text-blue-400">{holding.todayChangePercent.toFixed(2)}%</p>
-                      <p className="text-sm text-blue-600 dark:text-blue-400">₩{holding.todayProfitLoss.toLocaleString()}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 dark:text-gray-400 text-center py-4">오늘 하락한 종목이 없습니다</p>
-            )}
-          </div>
-
-          {/* 빠른 액션 */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">⚡ 빠른 액션</h3>
-            <div className="space-y-3">
-              <Link
-                href="/transactions"
-                className="flex items-center justify-between p-3 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
-              >
-                <div className="flex items-center">
-                  <svg className="h-5 w-5 text-green-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                  <span className="font-medium text-gray-900">거래 내역 등록</span>
-                </div>
-                <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </Link>
-
-              <Link
-                href="/holdings"
-                className="flex items-center justify-between p-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-              >
-                <div className="flex items-center">
-                  <svg className="h-5 w-5 text-blue-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 4h.01M9 16h.01" />
-                  </svg>
-                  <span className="font-medium text-gray-900">보유종목 관리</span>
-                </div>
-                <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </Link>
-
-              <Link
-                href="/analytics"
-                className="flex items-center justify-between p-3 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
-              >
-                <div className="flex items-center">
-                  <svg className="h-5 w-5 text-purple-600 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                  <span className="font-medium text-gray-900">전체 포트폴리오 분석</span>
-                </div>
-                <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* 실시간 업데이트 상태 */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">� 실시간 데이터 상태</h3>
-              <div className="flex items-center space-x-4 text-sm">
-                <div className="flex items-center">
-                  <div className={`w-3 h-3 rounded-full mr-2 ${
-                    stockDataLoading ? 'bg-blue-500 animate-pulse' : 'bg-green-500'
-                  }`}></div>
-                  <span className="text-gray-600 dark:text-gray-400">
-                    {stockDataLoading ? '업데이트 중...' : '연결됨'}
-                  </span>
-                </div>
-                <div className="text-gray-500 dark:text-gray-400">
-                  업데이트 주기: 5분
-                </div>
-                <div className="text-gray-500 dark:text-gray-400">
-                  추적 종목: {holdingSymbols.length}개
-                </div>
-              </div>
-            </div>
-            <div className="text-right text-sm text-gray-500 dark:text-gray-400">
-              마지막 업데이트: {stockLastUpdate ? new Date(stockLastUpdate).toLocaleString('ko-KR') : '업데이트 없음'}
-            </div>
-          </div>
-        </div>
-
-        {/* 데이터 업데이트 정보 */}
-        {stockLastUpdate && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-            <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
-              <div className="flex items-center">
-                <svg className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>마지막 업데이트: {new Date(stockLastUpdate).toLocaleString('ko-KR')}</span>
-              </div>
-              {stockError && (
-                <div className="flex items-center text-red-600">
-                  <svg className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span>실시간 데이터 업데이트 오류</span>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* 헤더 - 실시간 상태 */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-4">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              포트폴리오 현황
+            </h1>
+            <div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${isMarketOpen ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+              <span className="text-sm text-gray-600 dark:text-gray-400">
+                {isMarketOpen ? '실시간' : '휴장'}
+              </span>
+              {(isUpdatingPortfolio || isUpdatingIndices) && (
+                <div className="flex items-center space-x-1">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                  <span className="text-xs text-blue-600 dark:text-blue-400">업데이트 중</span>
                 </div>
               )}
             </div>
           </div>
-        )}
-
-        {/* 빈 상태 */}
-        {!isLoading && updatedHoldings.length === 0 && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-12 text-center">
-            <div className="mx-auto w-24 h-24 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
-              <svg className="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          <div className="flex items-center space-x-4">
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              {lastUpdate.toLocaleTimeString()}
+            </div>
+            <button
+              onClick={updateAllSections}
+              disabled={isUpdatingPortfolio || isUpdatingIndices}
+              className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className={`w-3 h-3 mr-1 ${(isUpdatingPortfolio || isUpdatingIndices) ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-            </div>
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">포트폴리오를 시작하세요!</h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              두 가지 방법으로 포트폴리오 관리를 시작할 수 있습니다.
-            </p>
-            
-            {/* 하이브리드 옵션 소개 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 text-left">
-              <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-                <div className="flex items-center space-x-2 mb-2">
-                  <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <h4 className="font-medium text-green-800 dark:text-green-300">거래내역 기반 (권장)</h4>
+              {(isUpdatingPortfolio || isUpdatingIndices) ? '업데이트 중...' : '새로고침'}
+            </button>
+          </div>
+        </div>
+
+        {/* 포트폴리오 현황 */}
+        <div className="mb-8">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+
+            {portfolio ? (
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* 총 평가금액 */}
+                  <div className="text-center">
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">총 평가금액</div>
+                    <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
+                      ₩{portfolio.totalValue.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400"></div>
+                  </div>
+                  
+                  {/* 오늘 손익 */}
+                  <div className="text-center">
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">오늘 손익</div>
+                    <div className={`text-3xl font-bold mb-1 ${
+                      portfolio.todayChange > 0 ? 'text-red-600 dark:text-red-400' : 
+                      portfolio.todayChange < 0 ? 'text-blue-600 dark:text-blue-400' : 
+                      'text-gray-700 dark:text-gray-300'
+                    }`}>
+                      {portfolio.todayChange > 0 ? '+' : ''}₩{Math.abs(portfolio.todayChange).toLocaleString()}
+                    </div>
+                    <div className={`text-sm font-semibold ${
+                      portfolio.todayChangePercent > 0 ? 'text-red-600 dark:text-red-400' : 
+                      portfolio.todayChangePercent < 0 ? 'text-blue-600 dark:text-blue-400' : 
+                      'text-gray-700 dark:text-gray-300'
+                    }`}>
+                      ({portfolio.todayChangePercent > 0 ? '+' : ''}{portfolio.todayChangePercent}%)
+                    </div>
+                  </div>
+                  
+                  {/* 총 수익률 */}
+                  <div className="text-center">
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mb-2">총 수익률</div>
+                    <div className={`text-3xl font-bold mb-1 ${
+                      portfolio.totalReturn > 0 ? 'text-red-600 dark:text-red-400' : 
+                      portfolio.totalReturn < 0 ? 'text-blue-600 dark:text-blue-400' : 
+                      'text-gray-700 dark:text-gray-300'
+                    }`}>
+                      {portfolio.totalReturn > 0 ? '+' : ''}₩{Math.abs(portfolio.totalReturn).toLocaleString()}
+                    </div>
+                    <div className={`text-sm font-semibold ${
+                      portfolio.totalReturnPercent > 0 ? 'text-red-600 dark:text-red-400' : 
+                      portfolio.totalReturnPercent < 0 ? 'text-blue-600 dark:text-blue-400' : 
+                      'text-gray-700 dark:text-gray-300'
+                    }`}>
+                      ({portfolio.totalReturnPercent > 0 ? '+' : ''}{portfolio.totalReturnPercent}%)
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm text-green-700 dark:text-green-400 mb-3">
-                  매수/매도 거래를 등록하면 보유종목이 자동으로 계산됩니다.
-                </p>
-                <Link
-                  href="/transactions"
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                >
-                  거래내역 등록하기
-                </Link>
               </div>
-              
-              <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-                <div className="flex items-center space-x-2 mb-2">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  <h4 className="font-medium text-blue-800 dark:text-blue-300">직접 입력</h4>
-                </div>
-                <p className="text-sm text-blue-700 dark:text-blue-400 mb-3">
-                  현재 보유 상황을 직접 입력하여 바로 시작할 수 있습니다.
-                </p>
-                <Link
-                  href="/holdings"
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  보유종목 직접 입력
-                </Link>
+            ) : (
+              <div className="p-6 text-center">
+                <div className="animate-pulse text-gray-500 dark:text-gray-400">데이터 로딩 중...</div>
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* 보유 종목 및 시장 정보 */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
+          {/* 보유 종목 당일 현황 */}
+          <div className="lg:col-span-3 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                보유 종목 현황 ({topStocks.length}개)
+              </h3>
             </div>
-            
-            <div className="text-center pt-4 border-t border-gray-200 dark:border-gray-600">
-              <Link
-                href="/accounts"
-                className="inline-flex items-center px-4 py-2 border border-gray-200 dark:border-gray-500 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                먼저 계좌 등록하기
-              </Link>
+            <div className="p-4">
+              <div className="space-y-2 max-h-180 overflow-y-auto">
+                {topStocks.map((stock, index) => (
+                  <div key={index} className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    <div className="flex-1 min-w-0 flex-grow-2">
+                      <div className="font-semibold text-gray-900 dark:text-white text-base truncate" title={stock.stockName}>
+                        {stock.stockName}
+                      </div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        {stock.quantity}주
+                      </div>
+                    </div>
+                    <div className="text-center w-24 flex-shrink-0 mx-2">
+                      <div className="font-semibold text-gray-900 dark:text-white text-base">
+                        {stock.currency === 'USD' ? '$' : '₩'}{stock.currentPrice.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="text-right w-28 flex-shrink-0 mr-2">
+                      <div className={`font-semibold text-base ${
+                        stock.todayChangePercent > 0 ? 'text-red-600 dark:text-red-400' : 
+                        stock.todayChangePercent < 0 ? 'text-blue-600 dark:text-blue-400' : 
+                        'text-gray-700 dark:text-gray-300'
+                      }`}>
+                        {stock.todayChangePercent > 0 ? '+' : stock.todayChangePercent < 0 ? '-' : ''}{stock.currency === 'USD' ? '$' : '₩'}{Math.abs(stock.todayChange).toLocaleString()}
+                      </div>
+                      <div className={`text-sm ${
+                        stock.todayChangePercent > 0 ? 'text-red-600 dark:text-red-400' : 
+                        stock.todayChangePercent < 0 ? 'text-blue-600 dark:text-blue-400' : 
+                        'text-gray-700 dark:text-gray-300'
+                      }`}>
+                        ({stock.todayChangePercent > 0 ? '+' : stock.todayChangePercent < 0 ? '' : ''}{stock.todayChangePercent.toFixed(1)}%)
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        )}
+
+          {/* 주요 지수 + 오늘의 알림 */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* 주요 지수 */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+              <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">주요 지수</h3>
+              </div>
+              <div className="p-4">
+                <div className="space-y-3">
+                  {marketIndices.map((index, idx) => (
+                    <div key={idx} className="flex justify-between items-center">
+                      <div className="font-semibold text-gray-900 dark:text-white">
+                        {index.name}
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold text-gray-900 dark:text-white">
+                          {index.name.includes('USD/KRW') ? 
+                            `₩${index.value.toFixed(2)}` : 
+                            index.name.includes('JPY(100)/KRW') ?
+                            `₩${index.value.toFixed(0)}` :
+                            index.value.toLocaleString()
+                          }
+                        </div>
+                        <div className={`text-sm ${
+                          index.changePercent > 0 ? 'text-red-600 dark:text-red-400' : 
+                          index.changePercent < 0 ? 'text-blue-600 dark:text-blue-400' : 
+                          'text-gray-700 dark:text-gray-300'
+                        }`}>
+                          {index.changePercent > 0 ? '+' : ''}{index.changePercent.toFixed(2)}%
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 오늘의 알림 */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+              <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">오늘의 알림</h3>
+              </div>
+              <div className="p-4">
+                {todayAlerts.length > 0 ? (
+                  <div className="space-y-2 max-h-90 overflow-y-auto">
+                    {todayAlerts.map((alert) => (
+                      <div key={alert.id} className={`p-4 rounded-lg border-l-4 ${
+                        alert.type === 'surge' ? 'bg-red-50 dark:bg-red-900/20 border-red-500' :
+                        alert.type === 'drop' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500' :
+                        alert.type === 'dividend' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500' :
+                        alert.type === 'earnings' ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-500' :
+                        alert.type === 'economic' ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-500' :
+                        alert.type === 'news' ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-500' :
+                        'bg-gray-50 dark:bg-gray-700/20 border-gray-500'
+                      }`}>
+                        <div className="font-semibold text-sm text-gray-900 dark:text-white mb-1">
+                          {alert.country && (alert.type === 'economic' || alert.type === 'news') ? alert.country : alert.stockName}
+                        </div>
+                        <div className={`text-xs ${
+                          alert.type === 'surge' ? 'text-red-700 dark:text-red-300' :
+                          alert.type === 'drop' ? 'text-blue-700 dark:text-blue-300' :
+                          alert.type === 'dividend' ? 'text-blue-700 dark:text-blue-300' :
+                          alert.type === 'earnings' ? 'text-purple-700 dark:text-purple-300' :
+                          alert.type === 'economic' ? 'text-yellow-700 dark:text-yellow-300' :
+                          alert.type === 'news' ? 'text-indigo-700 dark:text-indigo-300' :
+                          'text-gray-700 dark:text-gray-300'
+                        }`}>
+                          {alert.message}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-500 dark:text-gray-400 py-3">
+                    <svg className="w-6 h-6 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="text-sm">안정적인 하루입니다</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

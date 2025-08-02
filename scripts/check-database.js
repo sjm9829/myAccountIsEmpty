@@ -1,4 +1,4 @@
-import { PrismaClient } from '../src/generated/prisma';
+import { PrismaClient } from '../src/generated/prisma/index.js';
 
 const prisma = new PrismaClient();
 
@@ -53,6 +53,42 @@ async function checkDatabase() {
     
     console.log(`특정 사용자 ID (${specificUserId}) 존재 여부:`, specificUser ? '존재함' : '존재하지 않음');
     console.log(`특정 금융기관 ID (${specificInstitutionId}) 존재 여부:`, specificInstitution ? '존재함' : '존재하지 않음');
+    
+    console.log('\n---\n');
+    
+    // 보유종목 정보 확인
+    const holdings = await prisma.holding.findMany({
+      include: {
+        account: {
+          include: {
+            user: true,
+            institution: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+    });
+
+    console.log('등록된 보유종목 목록:');
+    let totalInvestment = 0;
+    
+    holdings.forEach((holding, index) => {
+      const investment = holding.quantity * holding.averagePrice;
+      totalInvestment += investment;
+      
+      console.log(`${index + 1}. ${holding.stockName} (${holding.stockCode})`);
+      console.log(`   사용자: ${holding.account.user.username}`);
+      console.log(`   계좌: ${holding.account.nickname || holding.account.institution.name}`);
+      console.log(`   수량: ${holding.quantity.toLocaleString()}주`);
+      console.log(`   평균단가: ₩${holding.averagePrice.toLocaleString()}`);
+      console.log(`   투자금액: ₩${investment.toLocaleString()}`);
+      console.log(`   통화: ${holding.currency || 'KRW'}`);
+      console.log('');
+    });
+
+    console.log(`총 투자 원금: ₩${totalInvestment.toLocaleString()}`);
     
   } catch (error) {
     console.error('데이터베이스 확인 중 오류:', error);

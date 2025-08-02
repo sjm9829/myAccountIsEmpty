@@ -446,7 +446,7 @@ export default function TransactionsPage() {
           <div className="px-4 py-6 sm:px-0">
             <div className="flex items-center justify-center min-h-[400px]">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <span className="ml-3 text-gray-700 dark:text-gray-300">거래내역을 불러오는 중...</span>
+              <span className="ml-3 text-gray-700 dark:text-gray-300">거래 내역을 불러오는 중...</span>
             </div>
           </div>
         </main>
@@ -463,7 +463,7 @@ export default function TransactionsPage() {
           {/* 헤더 */}
           <div className="mb-6 flex justify-between items-center">
             <div className="flex items-center space-x-4">
-              <h2 className="text-3xl font-bold text-gray-900 dark:text-white">거래내역 관리</h2>
+              <h2 className="text-3xl font-bold text-gray-900 dark:text-white">거래 내역 관리</h2>
               <span className="text-sm text-gray-500 dark:text-gray-400">입출금, 배당금, 매수/매도 내역 관리</span>
             </div>
             

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import jwt from 'jsonwebtoken';
+import { getPreviousTradingDay, isAfterMarketClose } from '@/utils/dateUtils';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -31,8 +32,13 @@ function getUserFromToken(request: NextRequest): string | null {
   }
 }
 
-// 실제 주가 데이터를 가져오는 함수
-async function getCurrentPrice(stockCode: string, currency: string = 'KRW'): Promise<number> {
+// 실제 주가 데이터를 가져오는 함수 (현재가와 전일종가 포함)
+async function getStockPriceData(stockCode: string, currency: string = 'KRW'): Promise<{
+  currentPrice: number;
+  previousClose: number;
+  change: number;
+  changePercent: number;
+}> {
   try {
     // 한국 주식인지 확인 (6자리 숫자)
     const isKoreanStock = /^\d{6}$/.test(stockCode);
@@ -41,10 +47,21 @@ async function getCurrentPrice(stockCode: string, currency: string = 'KRW'): Pro
     // 미국 주식인지 확인 (영문자)
     const isUSStock = /^[A-Z]{1,5}$/.test(stockCode) && currency === 'USD';
     
-    console.log(`getCurrentPrice for: ${stockCode}, currency: ${currency}, isKoreanStock: ${isKoreanStock}, isMetalFutures: ${isMetalFutures}, isUSStock: ${isUSStock}`);
+    console.log(`getStockPriceData for: ${stockCode}, currency: ${currency}, isKoreanStock: ${isKoreanStock}, isMetalFutures: ${isMetalFutures}, isUSStock: ${isUSStock}`);
+    
+    // 주말/휴장일 체크
+    const now = new Date();
+    const afterMarketClose = isAfterMarketClose(stockCode);
+    const previousTradingDay = getPreviousTradingDay(stockCode, now);
+    
+    console.log(`Market status for ${stockCode}:`, {
+      afterMarketClose,
+      currentTime: now.toISOString(),
+      previousTradingDay: previousTradingDay.toISOString().split('T')[0]
+    });
     
     // 현재 요청의 base URL을 사용하여 API 호출
-    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3001';
     
     if (isUSStock) {
       // 미국 주식은 Yahoo Finance API 사용
@@ -57,8 +74,24 @@ async function getCurrentPrice(stockCode: string, currency: string = 'KRW'): Pro
           console.log(`Yahoo API response for ${stockCode}:`, data);
           
           if (data.regularMarketPrice && data.regularMarketPrice > 0) {
-            console.log(`Using Yahoo price for ${stockCode}: ${data.regularMarketPrice}`);
-            return data.regularMarketPrice;
+            // 주말/휴장일에는 이전 영업일 기준으로 계산
+            let previousClose = data.previousClose || data.regularMarketPreviousClose || data.regularMarketPrice;
+            let change = data.regularMarketChange || 0;
+            let changePercent = data.regularMarketChangePercent || 0;
+            
+            // 주말이나 휴장일에는 데이터가 다를 수 있으므로 재계산
+            if (afterMarketClose && data.previousTradingDayData) {
+              previousClose = data.previousTradingDayData.close;
+              change = data.regularMarketPrice - previousClose;
+              changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+            }
+            
+            return {
+              currentPrice: data.regularMarketPrice,
+              previousClose,
+              change,
+              changePercent
+            };
           }
         } else {
           console.warn(`Yahoo API failed for ${stockCode} with status: ${response.status}`);
@@ -73,7 +106,35 @@ async function getCurrentPrice(stockCode: string, currency: string = 'KRW'): Pro
         const response = await fetch(`${baseUrl}/api/stock-data/korean?symbol=${stockCode}`);
         if (response.ok) {
           const data = await response.json();
-          return data.regularMarketPrice || 0;
+          const currentPrice = data.regularMarketPrice || 0;
+          let previousClose = data.previousClose || currentPrice;
+          let change = currentPrice - previousClose;
+          let changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+          
+          // 주말/휴장일에는 전일 대비 계산이 0이 될 수 있으므로 Yahoo Finance로 대체 시도
+          if (afterMarketClose && (change === 0 || changePercent === 0)) {
+            try {
+              console.log(`Trying Yahoo Finance for Korean stock ${stockCode} due to weekend/holiday`);
+              const yahooResponse = await fetch(`${baseUrl}/api/stock-data/yahoo?symbol=${stockCode}`);
+              if (yahooResponse.ok) {
+                const yahooData = await yahooResponse.json();
+                if (yahooData.regularMarketChange && yahooData.regularMarketChangePercent) {
+                  change = yahooData.regularMarketChange;
+                  changePercent = yahooData.regularMarketChangePercent;
+                  previousClose = currentPrice - change;
+                }
+              }
+            } catch (error) {
+              console.warn(`Yahoo fallback failed for ${stockCode}:`, error);
+            }
+          }
+          
+          return {
+            currentPrice,
+            previousClose,
+            change,
+            changePercent
+          };
         }
       } else {
         console.log(`Skipping Yahoo Finance for metal futures in holdings API: ${stockCode}`);
@@ -82,7 +143,17 @@ async function getCurrentPrice(stockCode: string, currency: string = 'KRW'): Pro
           const response = await fetch(`${baseUrl}/api/stock-data/naver?symbol=${stockCode}`);
           if (response.ok) {
             const data = await response.json();
-            return data.regularMarketPrice || 0;
+            const currentPrice = data.regularMarketPrice || 0;
+            const previousClose = data.previousClose || currentPrice;
+            const change = currentPrice - previousClose;
+            const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+            
+            return {
+              currentPrice,
+              previousClose,
+              change,
+              changePercent
+            };
           }
         } catch (error) {
           console.warn(`Naver API failed for ${stockCode} in holdings:`, error);
@@ -93,15 +164,37 @@ async function getCurrentPrice(stockCode: string, currency: string = 'KRW'): Pro
       const response = await fetch(`${baseUrl}/api/stock-data/yahoo?symbol=${stockCode}`);
       if (response.ok) {
         const data = await response.json();
-        return data.regularMarketPrice || 0;
+        const currentPrice = data.regularMarketPrice || 0;
+        let previousClose = data.previousClose || data.regularMarketPreviousClose || currentPrice;
+        let change = data.regularMarketChange || 0;
+        let changePercent = data.regularMarketChangePercent || 0;
+        
+        // 주말/휴장일에는 이전 영업일 기준으로 계산
+        if (afterMarketClose && data.previousTradingDayData) {
+          previousClose = data.previousTradingDayData.close;
+          change = currentPrice - previousClose;
+          changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+        }
+        
+        return {
+          currentPrice,
+          previousClose,
+          change,
+          changePercent
+        };
       }
     }
   } catch (error) {
-    console.error(`Failed to fetch price for ${stockCode}:`, error);
+    console.error(`Failed to fetch price data for ${stockCode}:`, error);
   }
   
   // API 호출 실패 시 기본값 반환
-  return 0;
+  return {
+    currentPrice: 0,
+    previousClose: 0,
+    change: 0,
+    changePercent: 0
+  };
 }
 
 // GET: 보유종목 목록 조회
@@ -118,6 +211,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get('accountId');
+    const limit = searchParams.get('limit');
 
     const whereClause: {
       account: {
@@ -134,7 +228,7 @@ export async function GET(request: NextRequest) {
       whereClause.accountId = accountId;
     }
 
-    const holdings = await prisma.holding.findMany({
+    const queryOptions = {
       where: whereClause,
       include: {
         account: {
@@ -144,14 +238,17 @@ export async function GET(request: NextRequest) {
         },
       },
       orderBy: {
-        updatedAt: 'desc',
+        updatedAt: 'desc' as const,
       },
-    });
+      ...(limit && !isNaN(parseInt(limit)) && { take: parseInt(limit) }),
+    };
+
+    const holdings = await prisma.holding.findMany(queryOptions);
 
     // 환율 정보 가져오기
     let exchangeRate = 1350; // 기본값
     try {
-      const exchangeResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/exchange-rate`);
+      const exchangeResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3001'}/api/exchange-rate`);
       if (exchangeResponse.ok) {
         const exchangeData = await exchangeResponse.json();
         exchangeRate = exchangeData.data.rate;
@@ -163,32 +260,55 @@ export async function GET(request: NextRequest) {
 
     // Calculate current prices and portfolio metrics
     const enrichedHoldings = await Promise.all(holdings.map(async (holding) => {
-      const currentPrice = await getCurrentPrice(holding.stockCode, holding.currency || 'KRW');
+      const priceData = await getStockPriceData(holding.stockCode, holding.currency || 'KRW');
+      const currentPrice = priceData.currentPrice;
+      const previousClose = priceData.previousClose;
+      const dailyChange = priceData.change;
+      const dailyChangePercent = priceData.changePercent;
       const currency = holding.currency || 'KRW';
       
-      // 통화별로 계산 (각 자산의 원래 통화로)
+      console.log(`Processing holding: ${holding.stockCode}, currency: ${currency}, currentPrice: ${currentPrice}, previousClose: ${previousClose}, dailyChange: ${dailyChange}, quantity: ${holding.quantity}, averagePrice: ${holding.averagePrice}`);
+      
+      // 보유종목별 계산 (각 자산의 원래 통화로)
       const totalValue = holding.quantity * currentPrice;
       const totalInvestment = holding.quantity * holding.averagePrice;
       const profitLoss = totalValue - totalInvestment;
       const profitLossPercentage = totalInvestment > 0 ? (profitLoss / totalInvestment) * 100 : 0;
 
+      // 전일 대비 변동 금액 (보유수량 기준)
+      const previousTotalValue = holding.quantity * previousClose;
+      const todayChange = totalValue - previousTotalValue;
+      const todayChangePercent = previousTotalValue > 0 ? (todayChange / previousTotalValue) * 100 : 0;
+
       // 원화 환산 값 (포트폴리오 전체 요약용)
       const totalValueKRW = currency === 'USD' ? totalValue * exchangeRate : totalValue;
       const totalInvestmentKRW = currency === 'USD' ? totalInvestment * exchangeRate : totalInvestment;
       const profitLossKRW = totalValueKRW - totalInvestmentKRW;
+      const todayChangeKRW = currency === 'USD' ? todayChange * exchangeRate : todayChange;
+
+      console.log(`  Original values: totalValue=${totalValue}, totalInvestment=${totalInvestment}, todayChange=${todayChange}`);
+      console.log(`  KRW converted: totalValueKRW=${totalValueKRW}, totalInvestmentKRW=${totalInvestmentKRW}, todayChangeKRW=${todayChangeKRW}, exchangeRate=${exchangeRate}`);
+      console.log(`  Applied exchange rate: ${currency === 'USD' ? 'YES' : 'NO'}`);
+      console.log('---');
 
       return {
         ...holding,
         currentPrice,
+        previousClose,
+        dailyChange,
+        dailyChangePercent,
         totalValue,
         totalInvestment,
         profitLoss,
         profitLossPercentage,
+        todayChange,
+        todayChangePercent,
         currency,
         // 원화 환산 값들 (전체 요약용)
         totalValueKRW,
         totalInvestmentKRW,
         profitLossKRW,
+        todayChangeKRW,
       };
     }));
 
@@ -197,6 +317,11 @@ export async function GET(request: NextRequest) {
     const totalInvestment = enrichedHoldings.reduce((sum, holding) => sum + holding.totalInvestmentKRW, 0);
     const totalProfitLoss = totalValue - totalInvestment;
     const totalProfitLossPercentage = totalInvestment > 0 ? (totalProfitLoss / totalInvestment) * 100 : 0;
+    
+    // 전일 대비 변동 금액 (전체 포트폴리오 기준)
+    const totalTodayChange = enrichedHoldings.reduce((sum, holding) => sum + holding.todayChangeKRW, 0);
+    const previousTotalValue = totalValue - totalTodayChange;
+    const totalTodayChangePercent = previousTotalValue > 0 ? (totalTodayChange / previousTotalValue) * 100 : 0;
 
     // 통화별 요약 정보도 제공
     const summaryByCurrency: Record<string, {
@@ -234,6 +359,8 @@ export async function GET(request: NextRequest) {
       totalInvestment,
       totalProfitLoss,
       totalProfitLossPercentage,
+      totalTodayChange,
+      totalTodayChangePercent,
       exchangeRate,
       byCurrency: summaryByCurrency
     };
